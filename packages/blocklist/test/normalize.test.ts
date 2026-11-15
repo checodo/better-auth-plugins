@@ -100,6 +100,13 @@ describe("normalizeEmail", () => {
   it("skips confusable folding when full normalization is off", () => {
     expect(normalizeEmail("а@example.com", { full: false })).toBe("а@example.com");
   });
+  it("handles a long run of dots quickly", () => {
+    const dots = ".".repeat(100_000);
+    const start = performance.now();
+    expect(normalizeEmail(`user@example${dots}x`)).toBe(`user@example${dots}x`);
+    expect(normalizeEmail(`user@example.com${dots}`)).toBe("user@example.com");
+    expect(performance.now() - start).toBeLessThan(500);
+  });
 });
 
 describe("normalizeDomain", () => {
@@ -110,6 +117,14 @@ describe("normalizeDomain", () => {
   it("accepts a leading @ or dot", () => {
     expect(normalizeDomain("@Example.com")).toBe("example.com");
     expect(normalizeDomain(".example.com")).toBe("example.com");
+  });
+  it("handles a long run of dots quickly", () => {
+    const dots = ".".repeat(100_000);
+    const start = performance.now();
+    expect(normalizeDomain(`example${dots}x`)).toBe(`example${dots}x`);
+    expect(normalizeDomain(`example.com${dots}`)).toBe("example.com");
+    expect(normalizeDomain(dots)).toBe("");
+    expect(performance.now() - start).toBeLessThan(500);
   });
 });
 

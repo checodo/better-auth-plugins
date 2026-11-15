@@ -80,7 +80,17 @@ export function normalizeValue(value: string, full = true): string {
  * OAuth providers or server code aren't validated the same way.
  */
 function withoutTrailingDots(email: string): string {
-  return email.includes("@") ? email.replace(/\.+$/, "") : email;
+  return email.includes("@") ? trimTrailingDots(email) : email;
+}
+
+/**
+ * Drops every `.` at the end. A loop, not `/\.+$/`: that regex retries from
+ * every dot of a long run of dots, which takes quadratic time.
+ */
+function trimTrailingDots(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 46) end -= 1;
+  return value.slice(0, end);
 }
 
 /**
@@ -113,7 +123,5 @@ export function getEmailDomain(email: string): string | undefined {
 
 /** Normalizes a `domain` rule value, accepting `@example.com`, `.example.com`, and `example.com.` too. */
 export function normalizeDomain(domain: string, full = true): string {
-  return normalizeValue(domain, full)
-    .replace(/^[@.]+/, "")
-    .replace(/\.+$/, "");
+  return trimTrailingDots(normalizeValue(domain, full).replace(/^[@.]+/, ""));
 }
