@@ -447,8 +447,12 @@ each get only the permissions they need:
   npm yet: one job builds and packs the tarballs without any secrets, the
   next publishes them in the `npm` environment with npm trusted publishing
   (no npm token, provenance included), then creates the git tags and
-  GitHub releases. A CycloneDX SBOM per package (`pnpm sbom`) is attached
-  to each release, and the docs are deployed (environment `docs`, a Vercel
+  GitHub releases. Each release gets the published tarball, a CycloneDX
+  SBOM (`pnpm sbom`), and a Sigstore bundle with signed build provenance
+  for both (also a GitHub attestation: `gh attestation verify <file>
+  --repo checodo/better-auth-plugins`). Release jobs install dependencies
+  without install scripts wherever nothing needs building. Then the docs
+  are deployed (environment `docs`, a Vercel
   deploy hook), so the docs always show the latest published version.
 - **Actions > Release > Run workflow** on `main` publishes a canary: each
   package with a pending changeset as `<next version>-canary-<datetime>`
@@ -575,7 +579,10 @@ purpose. If a real provider shows up in a list, add it to
 2. Set up `package.json`:
    - `name` (`@checodo/better-auth-<name>`), `version` `0.0.0`,
      `description`, `keywords`, `author`, `repository` (with
-     `directory`), `homepage`, `bugs`, and `license` (`MIT`, with a copy of the root
+     `directory`), `homepage` (the plugin's docs page,
+     `https://checodo-better-auth-plugins.vercel.app/docs/<name>`, also
+     linked from the README's "Documentation" section; npm shows it as the
+     package's homepage), `bugs`, and `license` (`MIT`, with a copy of the root
      `LICENSE.md` in the package folder; `pnpm smoke` checks it's there).
    - `"type": "module"`, `"sideEffects": false`, `files: ["dist"]`, and
      an `exports` map for `.`, `./client`, and `./package.json` pointing

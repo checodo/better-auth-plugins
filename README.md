@@ -107,7 +107,8 @@ pnpm changeset           # describe a change to a package (every PR that changes
 Versioning and publishing are done only by the `release.yml` workflow:
 merged changesets become a "Version Packages" pull request, and merging
 that publishes to npm with provenance, creates the tags and GitHub
-releases (with an SBOM per package), and deploys the docs. Canary
+releases (with the tarball, an SBOM, and signed build provenance per
+package), and deploys the docs. Canary
 versions are published by hand from the workflow. Nothing is ever
 published from a local machine. See
 [CONTRIBUTING.md](./CONTRIBUTING.md#ci-and-releases).

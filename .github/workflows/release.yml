@@ -4,14 +4,17 @@
 #
 # On every push to main:
 #   select-mode  pending changesets?        -> version
-#                unpublished versions?      -> pack -> publish -> sbom, docs
+#                unpublished versions?      -> pack -> publish -> release-assets, docs
 #   version      opens or updates the "Version Packages" PR. It uses a
 #                GitHub App token, not GITHUB_TOKEN, so CI runs on that PR.
 #   pack         builds the packages and packs the tarballs (no secrets).
 #   publish      publishes the tarballs to npm (environment `npm`, trusted
 #                publishing with provenance), then creates the git tags and
 #                GitHub releases. Only this job can get an npm OIDC token.
-#   sbom         attaches a CycloneDX SBOM to each new GitHub release.
+#   release-assets  attaches the published tarball, its CycloneDX SBOM,
+#                and a signed Sigstore bundle (build provenance for both,
+#                also stored as a GitHub attestation) to each new GitHub
+#                release.
 #   docs         deploys the docs (environment `docs`, Vercel deploy hook),
 #                so the docs always show the latest published version.
 #
@@ -60,8 +63,9 @@ jobs:
           # change what gets published.
           package-manager-cache: false
 
+      # Only the Changesets CLI is needed: no install scripts.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Select Changesets mode
         id: select-mode
@@ -88,8 +92,11 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
 
+      # Only the Changesets CLI is needed. No install scripts in a job that
+      # gets the GitHub App's key: a dependency's script could otherwise
+      # tamper with node_modules before the App token is created.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       # A PR opened with GITHUB_TOKEN gets no CI run (GitHub's rule against
       # loops), so the required `ci` check would never report. The App's
@@ -161,8 +168,8 @@ jobs:
           publish-plan-artifact-id: ${{ needs.select-mode.outputs.publish-plan-artifact-id }}
 
       # One SBOM per published package: its runtime dependencies, exactly
-      # as the lockfile resolves them. The sbom job attaches them to the
-      # GitHub releases.
+      # as the lockfile resolves them. The release-assets job attaches them
+      # to the GitHub releases.
       - name: Generate SBOMs
         run: |
           mkdir -p sbom
@@ -223,27 +230,70 @@ jobs:
           # explicit.
           PNPM_CONFIG_PROVENANCE: "true"
 
-  sbom:
-    needs: publish
+  release-assets:
+    needs: [pack, publish]
     if: needs.publish.outputs.published == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write # upload release assets
+      id-token: write # Sigstore signing of the attestation
+      attestations: write # store the attestation on GitHub
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sbom
           path: sbom
 
-      - name: Attach SBOMs to the GitHub releases
+      # The exact tarballs the publish job sent to npm.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.pack.outputs.pack-dir-artifact-id }}
+          path: pack
+
+      - name: Collect the release assets
+        env:
+          PUBLISHED: ${{ needs.publish.outputs.published-packages }}
+        run: |
+          mkdir assets
+          echo "$PUBLISHED" | jq -r '.[] | "\(.name) \(.version)"' | while read -r name version; do
+            slug="${name#@checodo/}"
+            tarball=$(find pack -type f -name "*${slug}-${version}.tgz" | head -n 1)
+            if [ -z "$tarball" ]; then
+              echo "::error::No tarball for $name@$version in the pack artifact."
+              exit 1
+            fi
+            cp "$tarball" "assets/${slug}-${version}.tgz"
+            cp "sbom/${slug}.cdx.json" "assets/${slug}-${version}.cdx.json"
+          done
+          ls -l assets
+
+      # SLSA build provenance for every tarball and SBOM, signed with
+      # Sigstore (keyless, the run's identity). Verify a download with
+      # `gh attestation verify <file> --repo checodo/better-auth-plugins`.
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: assets/*
+
+      # The Sigstore bundle goes next to the files it signs, so the
+      # signature is on the release itself (OpenSSF Scorecard,
+      # "Signed-Releases").
+      - name: Attach the assets to the GitHub releases
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISHED: ${{ needs.publish.outputs.published-packages }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           echo "$PUBLISHED" | jq -r '.[] | "\(.name) \(.version)"' | while read -r name version; do
-            file="sbom/${name#@checodo/}.cdx.json"
-            gh release upload "${name}@${version}" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+            slug="${name#@checodo/}"
+            cp "$BUNDLE" "assets/${slug}-${version}.sigstore.json"
+            gh release upload "${name}@${version}" \
+              "assets/${slug}-${version}.tgz" \
+              "assets/${slug}-${version}.cdx.json" \
+              "assets/${slug}-${version}.sigstore.json" \
+              --repo "$GITHUB_REPOSITORY" --clobber
           done
 
   docs:
@@ -378,3 +428,7 @@ jobs:
         run: pnpm changeset publish --tag canary --no-git-tag
         env:
           PNPM_CONFIG_PROVENANCE: "true"
+          # `pnpm publish` would run the packages' lifecycle scripts
+          # (prepack, prepublishOnly, ...) in the job that holds the OIDC
+          # token. The packages have none; this keeps it that way.
+          PNPM_CONFIG_IGNORE_SCRIPTS: "true"
