@@ -1,0 +1,72 @@
+---
+title: Epic Games
+description: Sign in with Epic Games (Epic Account Services, OpenID Connect).
+---
+
+Epic Games sign-in uses Epic Account Services with OpenID Connect. Install
+and set up the [authentication plugin](/docs/authentication) first; this
+page covers what is specific to Epic Games.
+
+## Get your credentials
+
+1. In the [Epic Developer Portal](https://dev.epicgames.com/portal), set up
+   Epic Account Services for your product and create a client.
+2. Add the redirect URL `https://<your app>/api/auth/callback/epic`.
+3. Use the client id and secret as `clientId` and `clientSecret`.
+
+## Configure the provider
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { authentication } from "@checodo/better-auth-authentication";
+
+export const auth = betterAuth({
+  plugins: [
+    authentication({
+      epic: {
+        clientId: process.env.EPIC_CLIENT_ID!,
+        clientSecret: process.env.EPIC_CLIENT_SECRET!,
+      },
+    }),
+  ],
+});
+```
+
+## Sign in
+
+```ts
+await authClient.signIn.social({ provider: "epic", callbackURL: "/dashboard" });
+```
+
+The provider id is `epic`. To link Epic Games to a signed-in user, see
+[Link an account](/docs/authentication#link-an-account).
+
+## Provider notes
+
+- Scopes: `basic_profile` (required by Epic) and `openid`; add more with
+  `scope`, e.g. `["friends_list"]`, if your client may request them.
+- The player is identified by Epic's ID token, verified against Epic's
+  keys, issuer, and your client id. The account id is the Epic account id
+  (`sub`); the name is the display name (`dn`).
+- Epic shares no email: players get `<Epic account id>@epic.invalid`, see
+  [Placeholder emails](/docs/authentication#placeholder-emails).
+- Epic doesn't document PKCE for web sign-in, so the plugin sends no PKCE
+  challenge. Turn it on with `pkce: true` if Epic supports it for your
+  client.
+
+## Options
+
+`epic` takes these, plus the
+[options every provider accepts](/docs/authentication#provider-options):
+
+<TypeTable
+  type={{
+    clientId: { type: "string", description: "Client id from the Epic Developer Portal.", required: true },
+    clientSecret: { type: "string", description: "Client secret.", required: true },
+    scope: { type: "string[]", description: "Scopes in addition to `basic_profile` and `openid`." },
+    disableDefaultScope: { type: "boolean", default: "false", description: "Don't request the default scopes." },
+    pkce: { type: "boolean", default: "false", description: "Send a PKCE challenge." },
+    redirectURI: { type: "string", description: "Override the redirect URL sent to Epic." },
+    prompt: { type: "string", description: "Passed to Epic's authorize page." },
+  }}
+/>

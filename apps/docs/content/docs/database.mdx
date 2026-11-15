@@ -1,0 +1,83 @@
+---
+title: Database
+description: The tables each plugin adds, how to create them, and the personal data they hold.
+---
+
+Plugins that store data declare their tables through better-auth's schema
+system, exactly like the official plugins. Every database adapter works,
+and the better-auth CLI creates the tables.
+
+## Create the tables
+
+After adding or upgrading a plugin, run the CLI:
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+Creates the tables directly, with better-auth's built-in Kysely adapter.
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+Writes the schema for your ORM (Prisma, Drizzle), which you then migrate
+with the ORM's own tools.
+
+</Tab>
+</Tabs>
+
+Each plugin's `schema` option renames its tables and columns, like the
+official plugins:
+
+```ts title="auth.ts"
+waitlist({
+  schema: {
+    waitlistEntry: { modelName: "waitlist_entries", fields: { createdAt: "created_at" } },
+  },
+});
+```
+
+## Tables
+
+| Plugin                               | Tables                                                   | Details                                    |
+| ------------------------------------ | -------------------------------------------------------- | ------------------------------------------ |
+| [Audit log](/docs/audit-log)         | `auditEvent`, and `auditChain` with `hashChain`          | [Schema](/docs/audit-log#schema)           |
+| [Authentication](/docs/authentication) | None: users and accounts are better-auth's own         | -                                          |
+| [Blocklist](/docs/blocklist)         | `blocklistRule`                                          | [Schema](/docs/blocklist#schema)           |
+| [Referral](/docs/referral)           | `referralCode`, `referral`, `referralStep`               | [Schema](/docs/referral#schema)            |
+| [Waitlist](/docs/waitlist)           | `waitlistEntry`                                          | [Schema](/docs/waitlist#schema)            |
+
+The audit log can keep its events elsewhere instead, with its `storage`
+option; then `auditEvent` isn't created.
+
+## Personal data
+
+For your records of processing and privacy policy: what each plugin
+stores about people, and what happens to it when a user is deleted.
+
+| Table           | Personal data                                                                     | When the user is deleted                                   |
+| --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `auditEvent`    | User ids, IP address, user agent; in `metadata`, emails and identifiers of failed sign-ins | Kept, with a `user-deleted` event. Removed by `retention` |
+| `blocklistRule` | Whatever admins block, which can be an email address                              | Not linked to users                                        |
+| `referralCode`  | The owner's user id                                                               | Deleted with the user                                      |
+| `referral`      | The referrer's and the referred user's ids                                        | Deleted with either user                                   |
+| `referralStep`  | Step `metadata` your server passes                                                | Deleted with its referral                                  |
+| `waitlistEntry` | Email, your `metadata`, the approving admin's id                                  | Kept, marked `registered`; delete it with `deleteEntry`    |
+| `user` (authentication) | Placeholder emails (`<account id>@steam.invalid`), names and avatars from the provider | better-auth's own deletion                         |
+
+Tokens and invite codes are stored only as hashes. "Deleted with the
+user" relies on foreign keys (`onDelete: "cascade"`), which SQL databases
+enforce; with MongoDB or a custom adapter, delete these rows yourself in
+`user.deleteUser.afterDelete`.
+
+See the audit log's [Privacy](/docs/audit-log#privacy) and
+[Retention](/docs/audit-log#retention) and the waitlist's
+[Privacy](/docs/waitlist#privacy) sections for what to tell your users and
+how long to keep data.

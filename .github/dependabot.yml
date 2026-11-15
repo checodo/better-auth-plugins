@@ -1,0 +1,57 @@
+# Version updates for the npm dependencies and the GitHub Actions.
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# `cooldown`: a new version is only proposed once it is a few days old.
+# pnpm refuses versions younger than a day anyway (`minimumReleaseAge` in
+# pnpm-workspace.yaml), and a short wait lets the registry catch a
+# compromised release before it reaches this repository.
+#
+# Security updates are off (repository settings): GitHub's dependency
+# graph can't read pnpm 12's lockfile yet. `pnpm audit` in
+# .github/workflows/audit.yml covers known vulnerabilities instead.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    # The workspace root: Dependabot reads pnpm-workspace.yaml and updates
+    # every package.json in the workspace and the version catalog in one
+    # go. (Listing apps/* and packages/* separately would treat them as
+    # separate projects: duplicate PRs that conflict on the one lockfile.)
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Minor and patch updates in one PR a week; each major update gets
+      # its own PR, since it may need code changes.
+      dependencies:
+        update-types: [minor, patch]
+    ignore:
+      # The types follow the Node version the project runs on (.nvmrc,
+      # Node 24): newer majors describe APIs Node 24 doesn't have.
+      # Raise both together when moving to a new Node version.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the rewritten (native) compiler; moving to it is a
+      # deliberate change (tsdown, Next.js, the type checks), not a weekly
+      # update. Remove this rule when doing that.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]

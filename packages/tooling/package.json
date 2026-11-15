@@ -1,0 +1,30 @@
+{
+  "name": "@repo/tooling",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shared build, lint, and test configuration for the monorepo. Never published.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/library.json": "./tsconfig/library.json",
+    "./tsdown": "./tsdown.ts",
+    "./vitest": "./vitest.ts",
+    "./test-helpers": "./test-helpers.ts"
+  },
+  "files": [
+    "tsconfig",
+    "tsdown.ts",
+    "vitest.ts",
+    "test-helpers.ts"
+  ],
+  "dependencies": {
+    "tsdown": "^0.23.7"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

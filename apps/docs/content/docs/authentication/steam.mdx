@@ -1,0 +1,98 @@
+---
+title: Steam
+description: Sign in with Steam (OpenID 2.0), with the player's name and avatar from the Steam Web API.
+---
+
+Steam uses OpenID 2.0, not OAuth. Install and set up the
+[authentication plugin](/docs/authentication) first; this page covers what
+is specific to Steam.
+
+## Get your credentials
+
+- **Nothing to register for sign-in**: Steam needs no client id and no
+  redirect URL; it sends players back to the URL the sign-in names.
+- **API key** (optional): create one at
+  [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
+  (it asks for your domain name). With it, users get their Steam name and
+  avatar (`ISteamUser/GetPlayerSummaries`); without it, they are named
+  `Steam <SteamID>`. The key is never logged.
+
+## Configure the provider
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { authentication } from "@checodo/better-auth-authentication";
+
+export const auth = betterAuth({
+  plugins: [
+    authentication({
+      steam: { apiKey: process.env.STEAM_API_KEY },
+    }),
+  ],
+});
+```
+
+`steam: {}` works too, without names and avatars.
+
+## Sign in
+
+```ts
+await authClient.signIn.social({ provider: "steam", callbackURL: "/dashboard" });
+```
+
+To link Steam to a signed-in user, see
+[Link an account](/docs/authentication#link-an-account).
+
+## Provider notes
+
+The plugin sends players to `https://steamcommunity.com/openid/login` and
+back to `/callback/steam`. There, before better-auth's callback runs, it
+checks Steam's answer:
+
+1. The fields are what this request expects: Steam's endpoint, a
+   `return_to` with this sign-in's state, a SteamID as claimed id, and the
+   required fields signed.
+2. Steam confirms the signature (`check_authentication`). OpenID 2.0 also
+   has Steam refuse an answer it confirmed before; independently, each
+   sign-in's state works only once and only in the browser that started
+   it.
+
+Only then does better-auth's callback continue, with a one-time code, so a
+sign-in can't be forged with made-up query parameters.
+
+- The account id is the SteamID64; the profile is in `mapProfileToUser`
+  (`steamid`, `personaname`, `avatarfull`, `profileurl`, ...).
+- Steam shares no email: players get `<SteamID64>@steam.invalid`, see
+  [Placeholder emails](/docs/authentication#placeholder-emails).
+- Publisher keys use `apiBaseURL: "https://partner.steam-api.com"`.
+
+### Errors
+
+Besides better-auth's own `error` values, a failed Steam sign-in can
+redirect with:
+
+| `error`                     | When                                                                    |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `steam_sign_in_cancelled`   | The player cancelled on Steam's page                                    |
+| `steam_verification_failed` | Steam's answer didn't check out, or Steam couldn't be reached to confirm it |
+
+Both are exported as `AUTHENTICATION_CALLBACK_ERRORS`.
+
+## Options
+
+`steam` takes these, plus the
+[options every provider accepts](/docs/authentication#provider-options):
+
+<TypeTable
+  type={{
+    apiKey: {
+      type: "string",
+      description: "Steam Web API key, to load the player's name and avatar.",
+    },
+    apiBaseURL: {
+      type: "string",
+      default: '"https://api.steampowered.com"',
+      description: "Web API host; `https://partner.steam-api.com` for publisher keys.",
+    },
+  }}
+/>

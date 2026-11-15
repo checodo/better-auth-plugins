@@ -1,0 +1,14 @@
+# Git hooks. Installed automatically by `pnpm install` (prepare script).
+# Skip once with `LEFTHOOK=0 git commit ...`.
+output:
+  - success
+  - failure
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      run: pnpm biome check --write --error-on-warnings --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
+      stage_fixed: true
+    lockfile:
+      glob: "{package.json,pnpm-lock.yaml,pnpm-workspace.yaml,packages/*/package.json,apps/*/package.json}"
+      run: pnpm install --frozen-lockfile --ignore-scripts

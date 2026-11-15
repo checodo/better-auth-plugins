@@ -1,0 +1,144 @@
+---
+title: Introduction
+description: Community plugins for better-auth that look and feel like the built-in ones.
+---
+
+`better-auth-plugins` is a collection of community plugins for
+[better-auth](https://better-auth.com). Each plugin is a small, opt-in
+package that you add to your auth config the same way as better-auth's own
+plugins, such as `username`, `organization`, or `admin`.
+
+## Why these plugins
+
+They are built for a real product that needed them: a waitlist before
+launch, referral rewards, an audit log, gaming sign-ins, and a blocklist
+against throwaway accounts. Instead of keeping that code inside one app,
+each piece is a plugin you can use too.
+
+## Plugins
+
+<Cards>
+  <Card
+    title="Audit log"
+    href="/docs/audit-log"
+    description="A log of sign-ins, failed sign-ins, account changes, and admin actions. Users see their own history, admins everyone's."
+  />
+  <Card
+    title="Authentication"
+    href="/docs/authentication"
+    description="Sign in with Steam, Epic Games, and Xbox through better-auth's own signIn.social, like any built-in social provider."
+  />
+  <Card
+    title="Blocklist"
+    href="/docs/blocklist"
+    description="Block disposable email domains, reserved usernames, and unwanted organization and team names. Includes ready-made lists."
+  />
+  <Card
+    title="Referral"
+    href="/docs/referral"
+    description="Referral codes, attribution for every sign-up method, and steps such as a first purchase before a referral earns a reward."
+  />
+  <Card
+    title="Waitlist"
+    href="/docs/waitlist"
+    description="Gate sign-up behind a waitlist with double opt-in. Admins approve entries, approved emails get an invite, and only they can create an account."
+  />
+</Cards>
+
+## How a plugin is set up
+
+Every plugin is installed the same way. Using the blocklist as an example:
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-blocklist
+```
+
+Each plugin is its own package under the `@checodo` scope, so you only
+install what you use. `better-auth` and `@better-auth/core` are peer
+dependencies.
+
+</Step>
+<Step>
+
+### Add the server plugin
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { blocklist } from "@checodo/better-auth-blocklist";
+
+export const auth = betterAuth({
+  plugins: [blocklist({ username: { values: ["admin"] } })],
+});
+```
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { blocklistClient } from "@checodo/better-auth-blocklist/client";
+
+export const authClient = createAuthClient({
+  plugins: [blocklistClient()],
+});
+```
+
+The client infers the plugin's endpoints from the server plugin, so calls
+like `authClient.blocklist.listRules()` are fully typed.
+
+</Step>
+<Step>
+
+### Migrate the database
+
+Plugins that store data declare their tables like built-in plugins do, so
+the better-auth CLI picks them up:
+
+```package-install
+npx auth@latest migrate
+```
+
+</Step>
+</Steps>
+
+## What every plugin gives you
+
+- **Typed options and endpoints**, on the server and the client, with
+  editor docs for every option.
+- **Error codes** you can check against, exported by each plugin (for
+  example `BLOCKLIST_ERROR_CODES`), with the same `{ code, message }`
+  responses as better-auth's own errors.
+- **Database tables** through better-auth's schema system, so migrations,
+  custom table and field names, and every database adapter work.
+- **OpenAPI metadata** for every endpoint, shown by better-auth's
+  `openAPI` plugin.
+- **Tests** against a real better-auth instance, and a docs page with every
+  option.
+
+## Guides
+
+- [Combining plugins](/docs/combining-plugins): all plugins in one
+  config, how they work together, and which of better-auth's plugins each
+  one is tested with.
+- [Database](/docs/database): the tables each plugin adds, and the
+  personal data they hold.
+- [FAQ](/docs/faq).
+
+## Requirements
+
+- `better-auth` and `@better-auth/core` 1.7.20 or a later 1.x release.
+- ESM. The packages ship ES modules with TypeScript types.
+
+## Contributing
+
+Ideas, bug reports, and new plugins are welcome once the repository is
+public. Its
+[contributing guide](https://github.com/checodo/better-auth-plugins/blob/main/CONTRIBUTING.md)
+covers the development setup and the conventions every plugin follows.

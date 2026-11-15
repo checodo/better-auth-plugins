@@ -1,0 +1,532 @@
+---
+title: Blocklist
+description: Block disallowed emails, usernames, and organization and team names.
+---
+
+The blocklist plugin stops disallowed values whenever they are created or
+changed: disposable email addresses, reserved usernames such as `admin`,
+and organization or team names you don't want. Rules come from the plugin
+options, from ready-made lists, and from a database table that admins can
+change at runtime.
+
+- Checks **every** user creation and update, not only email sign-up: OAuth,
+  magic link, email OTP, the admin plugin, and email changes.
+- Normalizes before matching, so `ADMIN`, ` admin `, and `аdmin` with a
+  Cyrillic "а" are all caught.
+- Ships opt-in lists of disposable email domains and reserved usernames.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-blocklist
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { blocklist } from "@checodo/better-auth-blocklist";
+
+export const auth = betterAuth({
+  plugins: [
+    blocklist({
+      email: {
+        domains: ["mailinator.com"],
+        addresses: ["spam@example.org"],
+      },
+      username: {
+        values: ["admin", "root"],
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+The plugin adds a `blocklistRule` table for rules managed at runtime (see
+[Schema](#schema)).
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+Only needed to manage rules from the client.
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { blocklistClient } from "@checodo/better-auth-blocklist/client";
+
+export const authClient = createAuthClient({
+  plugins: [blocklistClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+Configure each target you want to guard. Targets you leave out have no
+static rules, but rules added at runtime (see
+[Managing rules at runtime](#managing-rules-at-runtime)) still apply to
+them unless you set `useDatabase: false` on the target.
+
+```ts title="auth.ts"
+blocklist({
+  email: {
+    domains: ["mailinator.com"], // also blocks sub.mailinator.com
+    addresses: ["spam@example.org"], // also blocks spam+tag@example.org
+    allow: ["ceo@mailinator.com"], // always allowed
+  },
+  username: {
+    values: ["admin", { value: "^support_", type: "regex" }],
+  },
+  organization: {
+    values: ["billing", { value: "official", type: "contains" }],
+  },
+  team: {
+    values: ["everyone"],
+  },
+});
+```
+
+A blocked value fails the request with a `400`:
+
+```json
+{ "code": "EMAIL_NOT_ALLOWED", "message": "This email address is not allowed" }
+```
+
+### What is checked
+
+| Target         | Checked on                                                                                                                             | Requires                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `email`        | Every user creation and update, `/change-email` and `/email-otp/request-email-change` before a verification email or code is sent, the [waitlist](/docs/waitlist) plugin's `/waitlist/join` and `/waitlist/create-invite`, and the organization plugin's `/organization/invite-member` (before the invitation email is sent) | -                                   |
+| `username`     | Username and display username on every user creation and update, and `/is-username-available`                                       | `username` plugin                   |
+| `organization` | Name and slug on `/organization/create` and `/organization/update`, and slug on `/organization/check-slug`                             | `organization` plugin               |
+| `team`         | Name on `/organization/create-team` and `/organization/update-team`, and the default team's name on `/organization/create`           | `organization` plugin, with `teams` |
+
+Emails and usernames are checked in database hooks, so every way a user is
+created or updated is covered, including OAuth sign-ups and admin actions.
+On updates, only emails and usernames that actually change are checked, so
+a rule added later doesn't lock out existing users, for example when an
+OAuth sign-in writes their unchanged email back. Display usernames aren't
+unique, so they are checked whenever an update sets them, changed or not:
+a user whose display username matches a newer rule has to pick another
+one the next time they save it. With teams enabled, the
+organization plugin creates a default team named after each new
+organization, so that name must also pass the team rules.
+
+<Callout title="Availability checks">
+  `/is-username-available` and `/organization/check-slug` answer a blocked
+  value with the same error as the real request, so a form can show it
+  while the user types. They don't call `onBlocked`: nothing is created,
+  and they run on every keystroke.
+</Callout>
+
+### Rule types
+
+A rule is a plain string (an `exact` rule) or an object with a `type`:
+
+| Type       | Blocks the value when it...                               | Example rule                                         |
+| ---------- | --------------------------------------------------------- | ---------------------------------------------------- |
+| `exact`    | equals the rule                                           | `"admin"`                                            |
+| `domain`   | is an email whose domain is the rule or a subdomain of it | `{ value: "mailinator.com", type: "domain" }`        |
+| `prefix`   | starts with the rule                                      | `{ value: "support", type: "prefix" }`               |
+| `suffix`   | ends with the rule                                        | `{ value: "-bot", type: "suffix" }`                  |
+| `contains` | contains the rule                                         | `{ value: "official", type: "contains" }`            |
+| `regex`    | matches the rule as a regular expression                  | `{ value: "^admin\\d+$", type: "regex" }`            |
+
+Rules can carry a `reason`, which is passed to `onBlocked`. `domain` rules
+only work for `email`. Invalid static rules throw when the plugin is
+created, so mistakes show up at startup.
+
+<Callout type="warn" title="Regular expressions">
+  A slow pattern runs on every sign-up, so `regex` rules are restricted to
+  patterns whose matching time stays bounded. Rejected are patterns that are
+  invalid or longer than 200 characters, and patterns with:
+
+  - a quantified group that contains a quantifier or an alternation, at any
+    depth, such as `(a+)+`, `((a+))+`, or `(a|aa)+`;
+  - more than two unbounded quantifiers (`*`, `+`, `{n,}`, and `{n}` or
+    `{n,m}` above 10 repetitions), such as `.*.*.*x`;
+  - more than eight quantifiers in total;
+  - backreferences such as `\1` or `\k<name>`.
+
+  A `regex` rule only runs on values up to 256 characters. Longer values
+  are blocked by it, because they can't be checked safely. Valid emails
+  (at most 254 characters) and usernames with the `username` plugin's
+  default limit (30) always fit. Only let trusted admins create `regex`
+  rules.
+</Callout>
+
+### Normalization
+
+Values and rules are compared after normalization. Checked values are
+never stored normalized; rules created through the endpoints are (see
+[Create a rule](#create-a-rule)).
+
+1. Trim and lowercase (always).
+2. Unicode compatibility forms, so fullwidth `ＡＤＭＩＮ` or the ligature
+   `ﬁ` become plain letters.
+3. Remove invisible characters, such as zero-width spaces, soft hyphens,
+   bidi controls, and variation selectors, so `admin` with a zero-width space
+   inside still matches `admin`.
+4. Remove accents, so `ádmin` and the Turkish `ADMİN` match `admin`.
+   Marks that tell words apart in other scripts, such as Japanese
+   dakuten or Hindi and Thai vowel signs, are kept.
+5. Fold common confusable characters, so a Cyrillic `а`, a Greek `ο`, or
+   the Turkish dotless `ı` matches the Latin letter.
+6. For emails, drop trailing dots of the domain (`mailinator.com.` is the
+   same host as `mailinator.com`), and ignore a `+tag` in the local part
+   (`stripPlusAddressing`).
+
+Steps 2 to 5 can be turned off with `normalize: false`. A `regex` runs
+against the normalized value, so write it in lowercase: a pattern with
+an uppercase letter (outside escapes such as `\d` or `\p{L}`) is
+rejected.
+
+## Predefined lists
+
+`@checodo/better-auth-blocklist/lists` exports ready-made lists. They are
+opt-in, in a separate entry point, so they only load when you import them.
+
+```ts title="auth.ts"
+import { blocklist } from "@checodo/better-auth-blocklist";
+import {
+  disposableEmailDomains,
+  reservedUsernames,
+} from "@checodo/better-auth-blocklist/lists";
+
+blocklist({
+  email: { domains: disposableEmailDomains },
+  username: { values: reservedUsernames },
+  organization: { values: reservedUsernames },
+});
+```
+
+| Export                   | Entries | Content                                                          |
+| ------------------------ | ------- | ---------------------------------------------------------------- |
+| `disposableEmailDomains` | ~32,000 | Domains of disposable (temporary) email providers                |
+| `reservedUsernames`      | ~500    | System, route, and role names such as `admin`, `api`, `support` |
+
+Each list is also its own entry point, to load only what you need:
+
+```ts
+import { disposableEmailDomains } from "@checodo/better-auth-blocklist/lists/disposable-email-domains";
+import { reservedUsernames } from "@checodo/better-auth-blocklist/lists/reserved-usernames";
+```
+
+### How the domain list is built
+
+`disposableEmailDomains` is generated from permissively licensed lists
+(CC0, MIT, BSD), each pinned to an exact commit:
+[disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains),
+[burner-email-providers](https://github.com/wesbos/burner-email-providers),
+[mailchecker](https://github.com/FGRibreau/mailchecker),
+[fakefilter](https://github.com/7c/fakefilter),
+[disposable-email-domain-list](https://github.com/unkn0w/disposable-email-domain-list),
+[castle/disposable-email-domains](https://github.com/castle/disposable-email-domains),
+and [jp-disposable-emails](https://github.com/daisy1754/jp-disposable-emails).
+Then:
+
+1. Invalid entries are dropped, and the rest is de-duplicated and sorted.
+2. Known legitimate mail services are removed: the allowlist and mail
+   service list of [disposable/disposable](https://github.com/disposable/disposable),
+   and major providers such as Gmail, Outlook, GMX, and Proton.
+3. Public suffixes such as `net.ua` or `msk.ru` are removed, checked
+   against the [Public Suffix List](https://publicsuffix.org). Domain rules
+   also match subdomains, so a suffix would block every domain registered
+   under it.
+4. Every domain is checked in DNS (with public resolvers, not filtered
+   local ones), and only domains that verifiably receive email are kept:
+   they have a mail server (MX record) or an address that accepts mail.
+   Domains that don't exist, refuse all mail, or can't be confirmed are
+   removed, which is more than half of the merged list.
+
+`reservedUsernames` comes from
+[The Big Username Blacklist](https://github.com/jmitchel3/The-Big-Username-Blacklist)
+(MIT). The licenses ship in the package's `THIRD_PARTY_NOTICES.md`.
+
+<Callout title="Good to know">
+  - The lists are snapshots taken when the package is released. Update the
+    package to get newer ones.
+  - Matching stays fast however long the list is (a few lookups per check).
+    Loading the domain list takes some milliseconds and a few megabytes of
+    memory, once, when the plugin is created.
+</Callout>
+
+No list is perfect. Combine lists with your own entries, and use `allow`
+for false positives:
+
+```ts
+blocklist({
+  email: {
+    domains: [...disposableEmailDomains, "spam.example"],
+    allow: ["jane@flagged-but-fine.example"],
+  },
+});
+```
+
+## Managing rules at runtime
+
+Rules stored in the `blocklistRule` table apply on top of the static rules,
+right away, without a restart. Managing them requires a session whose user
+has one of `adminRoles` (the `role` field of better-auth's
+[admin plugin](https://better-auth.com/docs/plugins/admin)) or is listed in
+`adminUserIds`. Requests without a session get a `401`, other users a
+`403`.
+
+### Create a rule
+
+```ts
+const { data, error } = await authClient.blocklist.createRule({
+  target: "email", // "email" | "username" | "organization" | "team"
+  type: "domain", // defaults to "exact"
+  value: "spam.example",
+  reason: "Disposable provider", // optional
+});
+```
+
+### List rules
+
+```ts
+const { data } = await authClient.blocklist.listRules({
+  query: { target: "email" }, // optional filter
+});
+```
+
+### Delete a rule
+
+```ts
+await authClient.blocklist.deleteRule({ id: "rule-id" });
+```
+
+| Endpoint                      | Client                            | Server                         |
+| ----------------------------- | --------------------------------- | ------------------------------ |
+| `GET /blocklist/list-rules`   | `authClient.blocklist.listRules`  | `auth.api.listBlocklistRules`  |
+| `POST /blocklist/create-rule` | `authClient.blocklist.createRule` | `auth.api.createBlocklistRule` |
+| `POST /blocklist/delete-rule` | `authClient.blocklist.deleteRule` | `auth.api.deleteBlocklistRule` |
+
+New rules are validated: duplicates, values longer than 255 characters,
+`domain` rules outside `email`, unsafe regular expressions, and targets
+with `useDatabase: false` are rejected. Values are stored the way they are
+matched (lowercase and normalized, domains without a leading `@`), so
+`Spam.io` and `spam.io` count as the same rule. Regular expressions are
+stored as written.
+
+Database rules are cached for `databaseCacheTtl` (10 seconds by default).
+Changes through the endpoints apply right away on the server that made
+them; other servers pick them up when their cache expires.
+
+<Callout title="Several servers">
+  The cache is kept in each server process, not shared. With several
+  instances or serverless functions, a new or deleted rule can take up to
+  `databaseCacheTtl` to reach all of them. Rules from the plugin options
+  are compiled at startup in every process, so they always agree. If a
+  rule must apply everywhere at once, set `databaseCacheTtl: 0`: every
+  check then reads the rules from the database.
+</Callout>
+
+<Callout title="With the audit log">
+  With the [audit log](/docs/audit-log) plugin, blocked sign-ups and changes, and the rules admins create and delete are recorded there
+  too (see [Events from other plugins](/docs/audit-log#events-from-other-plugins)).
+</Callout>
+
+## Schema
+
+Table: `blocklistRule`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the rule.", required: true },
+    target: {
+      type: '"email" | "username" | "organization" | "team"',
+      description: "The kind of value the rule applies to. Indexed.",
+      required: true,
+    },
+    type: {
+      type: '"exact" | "domain" | "prefix" | "suffix" | "contains" | "regex"',
+      description: "How the value is matched.",
+      required: true,
+    },
+    value: { type: "string", description: "The value or pattern to block.", required: true },
+    reason: { type: "string", description: "Why the value is blocked." },
+    createdAt: { type: "Date", description: "When the rule was created.", required: true },
+  }}
+/>
+
+To rename the table or its columns, for example to match a snake_case
+database, use the `schema` option:
+
+```ts title="auth.ts"
+blocklist({
+  schema: {
+    blocklistRule: {
+      modelName: "blocklist_rules",
+      fields: { createdAt: "created_at" },
+    },
+  },
+});
+```
+
+## Error codes
+
+Exported as `BLOCKLIST_ERROR_CODES` from both entry points, to compare
+with `error.code`:
+
+```ts
+import { BLOCKLIST_ERROR_CODES } from "@checodo/better-auth-blocklist/client";
+
+if (error?.code === BLOCKLIST_ERROR_CODES.EMAIL_NOT_ALLOWED.code) {
+  // show "Please use a permanent email address"
+}
+```
+
+| Code                                            | Status | When                                              |
+| ----------------------------------------------- | ------ | ------------------------------------------------- |
+| `EMAIL_NOT_ALLOWED`                             | 400    | A blocked email                                   |
+| `USERNAME_NOT_ALLOWED`                          | 400    | A blocked username                                |
+| `ORGANIZATION_NAME_NOT_ALLOWED`                 | 400    | A blocked organization name or slug               |
+| `TEAM_NAME_NOT_ALLOWED`                         | 400    | A blocked team name                               |
+| `VALUE_NOT_ALLOWED`                             | 400    | Any blocked value, with `genericErrorMessage`     |
+| `YOU_ARE_NOT_ALLOWED_TO_MANAGE_BLOCKLIST_RULES` | 403    | Rule endpoints, for users who aren't admins       |
+| `RULE_ALREADY_EXISTS`                           | 400    | Creating a duplicate rule                         |
+| `RULE_NOT_FOUND`                                | 404    | Deleting a rule that doesn't exist                |
+| `INVALID_REGEX_RULE`                            | 400    | Creating an invalid or unsafe `regex` rule        |
+| `REGEX_RULE_MUST_BE_LOWERCASE`                  | 400    | Creating a `regex` rule with uppercase letters    |
+| `DOMAIN_RULE_ONLY_FOR_EMAIL`                    | 400    | Creating a `domain` rule outside `email`          |
+| `DATABASE_RULES_DISABLED_FOR_TARGET`            | 400    | Creating a rule for a target with `useDatabase: false` |
+| `RULE_VALUE_TOO_LONG`                           | 400    | Creating a rule whose normalized value is too long |
+
+## Options
+
+<TypeTable
+  type={{
+    email: {
+      type: "BlocklistEmailOptions",
+      description:
+        "Rules for email addresses: the target options below, plus `domains`, `addresses`, and `stripPlusAddressing`.",
+    },
+    username: {
+      type: "BlocklistTargetOptions",
+      description: "Rules for usernames. Requires the `username` plugin.",
+    },
+    organization: {
+      type: "BlocklistTargetOptions",
+      description: "Rules for organization names and slugs. Requires the `organization` plugin.",
+    },
+    team: {
+      type: "BlocklistTargetOptions",
+      description: "Rules for team names. Requires the `organization` plugin with teams.",
+    },
+    normalize: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Apply Unicode compatibility forms, remove accents and invisible characters, and fold confusable characters. Values are always trimmed and lowercased.",
+    },
+    genericErrorMessage: {
+      type: "boolean",
+      default: "false",
+      description: "Return `VALUE_NOT_ALLOWED` instead of naming the blocked field.",
+    },
+    adminRoles: {
+      type: "string[]",
+      default: '["admin"]',
+      description: "Roles that may manage database rules.",
+    },
+    adminUserIds: {
+      type: "string[]",
+      default: "[]",
+      description: "User ids that may manage database rules, whatever their role.",
+    },
+    schema: {
+      type: "{ blocklistRule?: { modelName?, fields? } }",
+      description: "Rename the `blocklistRule` table or its columns. See [Schema](#schema).",
+    },
+    databaseCacheTtl: {
+      type: "number",
+      default: "10000",
+      description:
+        "How long database rules are cached, in milliseconds. `0` reads the database on every check.",
+    },
+    onBlocked: {
+      type: "({ target, value, rule }) => void | Promise<void>",
+      description:
+        "Called whenever a create or update is blocked, before the request fails. Useful for logging or auditing. Errors thrown here are logged and don't change the response.",
+    },
+  }}
+/>
+
+### Target options
+
+<TypeTable
+  type={{
+    values: {
+      type: "(string | { value, type?, reason? })[]",
+      description: "Blocked values. A plain string is an `exact` rule.",
+    },
+    allow: {
+      type: "string[]",
+      description: "Values that are always allowed, even when a rule matches. Compared after normalization.",
+    },
+    useDatabase: {
+      type: "boolean",
+      default: "true",
+      description: "Also apply the rules stored in the `blocklistRule` table.",
+    },
+  }}
+/>
+
+### Email options
+
+In addition to the target options:
+
+<TypeTable
+  type={{
+    domains: {
+      type: "string[]",
+      description: "Blocked domains, including their subdomains. Shorthand for `domain` rules.",
+    },
+    addresses: {
+      type: "string[]",
+      description: "Blocked addresses. Shorthand for `exact` rules.",
+    },
+    stripPlusAddressing: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Ignore a `+tag` in the local part, so a rule for `user@example.org` also matches `user+tag@example.org`.",
+    },
+  }}
+/>

@@ -1,0 +1,42 @@
+name: Audit
+
+# Known vulnerabilities in the dependencies, read from the lockfile.
+# Needed because GitHub's dependency graph (and so Dependabot alerts)
+# can't read pnpm 12's lockfile yet. Remove this workflow once
+# Insights > Dependency graph lists the dependencies.
+#
+# Not a required check: a newly published advisory shouldn't block
+# unrelated pull requests. The daily run reports it on `main`.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      # Reads pnpm-lock.yaml; nothing is installed or run.
+      - name: Check for known vulnerabilities
+        run: pnpm audit --audit-level=moderate

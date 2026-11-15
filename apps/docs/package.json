@@ -1,0 +1,40 @@
+{
+  "name": "docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000",
+    "typecheck": "next typegen && tsc --noEmit && node scripts/check-snippets.mts",
+    "clean": "rm -rf .next .turbo"
+  },
+  "dependencies": {
+    "fumadocs-core": "16.19.0",
+    "fumadocs-mdx": "15.6.1",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@16.19.0",
+    "geist": "^1.9.2",
+    "next": "16.4.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@better-auth/core": "catalog:",
+    "@checodo/better-auth-audit-log": "workspace:*",
+    "@checodo/better-auth-authentication": "workspace:*",
+    "@checodo/better-auth-blocklist": "workspace:*",
+    "@checodo/better-auth-referral": "workspace:*",
+    "@checodo/better-auth-waitlist": "workspace:*",
+    "@repo/tooling": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "catalog:",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "better-auth": "catalog:",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

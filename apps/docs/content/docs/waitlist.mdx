@@ -1,0 +1,613 @@
+---
+title: Waitlist
+description: Gate sign-up behind a waitlist with double opt-in, admin approval, and invite codes.
+---
+
+The waitlist plugin lets people join a waitlist with their email while
+sign-up is closed. They confirm their email (double opt-in), admins approve
+entries, each approval sends an invite, and only approved emails can create
+an account.
+
+- Gates **every** way a user is created, not only email sign-up: OAuth,
+  magic link, email OTP, and users created by your own server code.
+- Double opt-in by default: nobody can put someone else's email on the
+  waitlist.
+- Answers the join request the same way for new, waiting, and existing
+  emails, so the waitlist can't be used to find out who signed up.
+- Single-use invite codes, bound to one email, that expire.
+- Status and "leave the waitlist" links for every entry.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-waitlist
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+The plugin hands you the tokens and codes; you send the emails and build
+the links to pages of your app (see [Pages to build](#pages-to-build)).
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { waitlist } from "@checodo/better-auth-waitlist";
+
+export const auth = betterAuth({
+  plugins: [
+    waitlist({
+      sendConfirmationEmail: async ({ email, token }) => {
+        await sendEmail({
+          to: email,
+          subject: "Confirm your spot on the waitlist",
+          text: `https://example.com/waitlist/confirm?token=${token}`,
+        });
+      },
+      sendInvite: async ({ email, inviteCode }) => {
+        await sendEmail({
+          to: email,
+          subject: "You're in!",
+          text: `https://example.com/sign-up?invite=${inviteCode}`,
+        });
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+The plugin adds a `waitlistEntry` table (see [Schema](#schema)).
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { waitlistClient } from "@checodo/better-auth-waitlist/client";
+
+export const authClient = createAuthClient({
+  plugins: [waitlistClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Join the waitlist
+
+```ts
+const { data, error } = await authClient.waitlist.join({
+  email: "ada@example.com",
+  metadata: { source: "launch-tweet" }, // optional, stored as JSON
+});
+// data: { success: true }
+```
+
+The answer is `{ success: true }` whether the email is new, already on the
+waitlist, or already has an account. With `advanced.backgroundTasks`
+configured, the plugin's callbacks (`sendConfirmationEmail`, `onJoin`,
+`sendInvite`) run after the response, so its timing doesn't give anything
+away either.
+
+### Double opt-in
+
+By default (`confirmEmail: true`), a new entry is `unconfirmed` and
+`sendConfirmationEmail` gets a token for the confirmation link. The entry
+only counts once the link is opened: only confirmed entries can be
+approved, and `onJoin` and `autoApprove` run after the confirmation.
+
+- The link works for `confirmationExpiresIn` (2 days by default). Joining
+  again with an unconfirmed email sends the link again, valid for another
+  `confirmationExpiresIn`, for people who lost the first email.
+- Whoever fills in the join form doesn't have to own the address, so
+  resends are limited: at most one every 5 minutes, and 3 in total. An
+  address gets at most 4 confirmation emails until its entry expires,
+  however often someone submits it. The answer to the join request is the
+  same whether an email went out or not.
+- Unconfirmed entries whose link has expired are deleted, so emails nobody
+  confirmed aren't kept.
+- An admin can still invite an unconfirmed email directly (see
+  [Managing the waitlist](#managing-the-waitlist)), for example someone who
+  asked in person. That is the admin's call.
+
+Without double opt-in (`confirmEmail: false`), new entries are `pending`
+right away and `sendConfirmationEmail` isn't needed.
+
+### Pages to build
+
+The emails link to pages of your app, which call the plugin with the token
+from the URL:
+
+```ts
+// /waitlist/confirm?token=...  (from sendConfirmationEmail)
+await authClient.waitlist.confirm({ token });
+
+// /waitlist/status?token=...  (link it in any email that carries a token)
+const { data } = await authClient.waitlist.getStatus({ query: { token } });
+// data: { email, status, position, inviteExpiresAt }
+// position: 1-based place among pending entries, null otherwise
+
+// /waitlist/leave?token=...
+await authClient.waitlist.leave({ token });
+
+// /sign-up?invite=...  (from sendInvite): show the form only for valid codes
+const { data: invite } = await authClient.waitlist.checkInvite({ query: { code } });
+// invite: { valid: boolean }
+```
+
+Confirming happens in a request your page makes, not when the email link is
+opened, so link scanners in mail programs don't confirm entries by
+accident. `sendInvite` also gets the entry's `token`, to put status and
+leave links in the invite email.
+
+There's no way to look an entry up by email: only someone with the token,
+which is only ever sent to that email, can see its status or remove it.
+The admin endpoints don't return tokens either. Invalid or unknown tokens
+get `INVALID_TOKEN`.
+
+Tokens and invite codes are stored as SHA-256 hashes (`tokenHash`,
+`inviteCodeHash`), like passwords:
+someone who can read your database (a backup, a leaked replica) can't use
+them. The plain values only exist in the emails, in `onJoin`, and in the
+admin response that issues an invite. So the plugin can't send the same
+token twice: a confirmation resend and an admin approval each come with a
+new token, and links from earlier emails stop working. The newest email
+always has working links.
+
+Treat tokens like passwords anyway: anyone with a link (a forwarded email,
+say) can see the entry's status and remove it, so don't log them.
+
+### How an entry moves
+
+| Status        | Meaning                                                 |
+| ------------- | ------------------------------------------------------- |
+| `unconfirmed` | Joined, but hasn't confirmed the email yet              |
+| `pending`     | On the waitlist, waiting for approval                   |
+| `approved`    | May create an account until the invite expires          |
+| `rejected`    | May not create an account                               |
+| `registered`  | Created an account; the invite can't be used again      |
+
+Approving an entry creates an invite code, sets its expiry
+(`inviteExpiresIn`, 7 days by default), and calls `sendInvite`.
+
+### Sign-up
+
+While the plugin is `enabled`, a user can only be created for an approved
+email whose invite hasn't expired. Everyone else gets a `403`:
+
+```json
+{ "code": "EMAIL_NOT_APPROVED", "message": "This email has not been approved to sign up yet" }
+```
+
+The check runs whenever a user is created, so it covers every sign-up
+method: email and password, OAuth, magic link, email OTP, phone number,
+and Sign-In with Ethereum. Existing
+users keep signing in as usual. That includes users your own server code
+creates directly, outside a request, for example a seed script: they are
+blocked too, unless their email is in `allow` or `bypass` lets them
+through. Some ways in skip the waitlist:
+
+- **`allow`**: emails (`"ceo@acme.com"`) and domains (`"acme.com"`,
+  including subdomains) that may always sign up.
+- **`bypass`**: a function that gets the request creating the user
+  (`null` outside a request). By default, users created by admins through
+  the [admin plugin](https://better-auth.com/docs/plugins/admin)'s
+  `createUser` skip the waitlist.
+
+Users without a real email are blocked too, because their generated
+email is never on the waitlist:
+
+| Sign-in method                                                                         | Generated email                                     |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| [Anonymous](https://better-auth.com/docs/plugins/anonymous) guests                     | `temp-...@<emailDomainName>`                        |
+| [Phone number](https://better-auth.com/docs/plugins/phone-number) sign-up on verification | what `signUpOnVerification.getTempEmail` returns |
+| [Sign-In with Ethereum](https://better-auth.com/docs/plugins/siwe) without an email    | `<wallet address>@<emailDomainName>`                |
+| Steam, Epic Games, and Xbox ([authentication](/docs/authentication#placeholder-emails)) | `<account id>@steam.invalid`, `epic.invalid`, `xbox.invalid` |
+
+To keep such a method open, put its domain in `allow`, or let its
+requests through with `bypass`:
+
+```ts title="auth.ts"
+waitlist({
+  // phone number and gaming sign-ups skip the waitlist
+  allow: ["phone.example.com", "steam.invalid", "epic.invalid", "xbox.invalid"],
+  // and so do guests (keep admins' createUser, the default)
+  bypass: (context) =>
+    context?.path === "/admin/create-user" || context?.path === "/sign-in/anonymous",
+});
+```
+
+<Callout type="warn" title="Allowed domains need email verification">
+  An `allow` entry lets anyone sign up with an email on that domain,
+  whether or not they own the address. Without better-auth's
+  `requireEmailVerification`, someone could sign up as
+  `anything@your-company.com` and get in. Allowed domains are only as safe
+  as your email verification.
+</Callout>
+
+### Invite codes
+
+<Callout type="warn" title="The approved email alone is enough by default">
+  With the default `requireInviteCode: false`, anyone who signs up with an
+  approved email gets in, whether or not they got the invite. To make sure
+  only the invited person can claim the account, turn on
+  `requireInviteCode`, or better-auth's
+  [`requireEmailVerification`](https://better-auth.com/docs/concepts/email)
+  so the account can't be used without access to the inbox. Social sign-in
+  (Google, GitHub, ...) is safe either way: the provider has verified the
+  email.
+</Callout>
+
+With `requireInviteCode: true`, the invite code has to come with the
+sign-up. Without a code, every sign-up fails with `INVITE_CODE_REQUIRED`;
+with a code that doesn't belong to an approved entry for that email, with
+`INVALID_INVITE_CODE`. Both answers are the same whether the email is
+approved or not, so sign-up attempts don't reveal who is on the
+waitlist. Codes are compared in constant time.
+
+```ts
+// email and password
+await authClient.signUp.email(
+  { email, password, name },
+  { headers: { "x-invite-code": inviteCode } },
+);
+
+// social sign-in
+await authClient.signIn.social({
+  provider: "github",
+  additionalData: { inviteCode },
+});
+
+// any other method: the x-invite-code header on the request that creates the user
+await authClient.signIn.emailOtp(
+  { email, otp },
+  { headers: { "x-invite-code": inviteCode } },
+);
+```
+
+The header is the typed way for better-auth's client; an `inviteCode`
+field in the sign-up body works too, for plain HTTP requests such as an
+HTML form.
+
+<Callout title="Auth server on another domain?">
+  `x-invite-code` is a custom header. If your app and your auth server run
+  on different origins, the browser only sends it when the server's CORS
+  configuration allows it (`Access-Control-Allow-Headers`). Add the header
+  there. Social sign-in (`additionalData`) and the body field need no extra
+  header.
+</Callout>
+
+A magic link creates the user when the link from the email is opened, a
+request your app doesn't control, so `requireInviteCode` doesn't work with
+magic link sign-up.
+
+### Blocklist
+
+With the [blocklist](/docs/blocklist) plugin, blocked emails (disposable
+domains, for example) can't join the waitlist or be invited: `join` and
+`createInvite` answer `EMAIL_NOT_ALLOWED`, instead of the email failing
+only at sign-up.
+
+### Rate limits
+
+The public endpoints (`join`, `confirm`, `get-status`, `leave`,
+`check-invite`) are limited to 5 requests per minute per IP by better-auth's
+[rate limiter](https://better-auth.com/docs/concepts/rate-limit), which is
+on in production by default. A person joins once or twice; the limit is
+there to slow down bots. Change it with `rateLimit.customRules`, which
+take precedence over plugin rules:
+
+```ts title="auth.ts"
+betterAuth({
+  rateLimit: {
+    customRules: { "/waitlist/join": { window: 60, max: 10 } },
+  },
+});
+```
+
+<Callout type="warn" title="More than one server? Share the rate limit's storage">
+  better-auth counts requests in memory by default, per server process. With
+  several instances or serverless functions, every instance keeps its own
+  count, so the real limit is 5 per minute *per instance* and barely slows
+  down guessing. Store the counts where all instances see them, with
+  `rateLimit.storage: "database"` or `"secondary-storage"` (Redis, for
+  example). The limiter is also off in development unless you set
+  `rateLimit.enabled: true`.
+</Callout>
+
+### Capacity
+
+`maxEntries` (unlimited by default) caps how many people are waiting:
+`pending` and `approved` entries. Once the waitlist holds that many,
+joining and confirming fail with `WAITLIST_FULL`, for every email. Other
+entries don't count: unconfirmed ones, so fake sign-ups can't fill the
+waitlist (they expire after `confirmationExpiresIn`), and rejected and
+registered ones, which have left it. Rejecting an entry, or an approved
+user signing up, frees a place.
+
+The limit holds under concurrent requests too: a join or confirmation that
+finds the waitlist over `maxEntries` once its entry is written takes the
+entry back (a confirmed entry goes back to `unconfirmed`) and fails with
+`WAITLIST_FULL`. When several requests race for the last place, all of them
+may fail; the place stays free for the next try.
+
+### Privacy
+
+<Callout title="Not legal advice">
+  A waitlist stores email addresses, which is personal data. Keep double
+  opt-in on, so you can show that every person asked to be contacted;
+  mention the waitlist in your privacy policy; and put the leave link in
+  your emails, so people can withdraw and have their entry deleted.
+</Callout>
+
+Unconfirmed entries are deleted when their link expires. All other entries,
+including rejected and registered ones, stay until someone leaves or an
+admin deletes them: delete what you no longer need, for example rejected
+entries after a while.
+
+## Managing the waitlist
+
+The admin endpoints require a session whose user has one of `adminRoles`
+(the `role` field of better-auth's admin plugin) or is listed in
+`adminUserIds`. Requests without a session get a `401`, other users a
+`403`.
+
+```ts
+// entries in the order they joined, oldest first
+const { data } = await authClient.waitlist.listEntries({
+  query: { status: "pending", search: "example.com", limit: 50, offset: 0 },
+});
+// data: { entries, total }
+
+// approve the next 10 pending entries, or specific ones with { ids: [...] }
+await authClient.waitlist.approveEntries({ count: 10 });
+
+await authClient.waitlist.rejectEntry({ id: "entry-id" });
+await authClient.waitlist.deleteEntry({ id: "entry-id" });
+
+// invite someone directly, whether or not they are on the waitlist
+await authClient.waitlist.createInvite({ email: "guest@example.com" });
+
+const { data: stats } = await authClient.waitlist.getStats();
+// stats: { unconfirmed, pending, approved, rejected, registered, total }
+```
+
+- **Renewing an invite**: approve an approved entry again, for example
+  when the person lost the email or the invite expired. They get a new
+  code with a new expiry, and the old code stops working.
+- `approveEntries` skips `unconfirmed` entries (they haven't agreed to be
+  contacted) and `registered` ones.
+- Rejecting an entry invalidates its invite.
+- Entries come back without their `token`: only the person gets it, by
+  email.
+- `inviteCode` is the plain code only in the responses of `approveEntries`
+  and `createInvite`, which issue it (to share it another way than
+  `sendInvite`); everywhere else it is `null`, because only its hash is
+  stored.
+
+| Endpoint                         | Client                               | Server                            |
+| -------------------------------- | ------------------------------------ | --------------------------------- |
+| `POST /waitlist/join`            | `authClient.waitlist.join`           | `auth.api.joinWaitlist`           |
+| `POST /waitlist/confirm`         | `authClient.waitlist.confirm`        | `auth.api.confirmWaitlistEmail`   |
+| `GET /waitlist/get-status`       | `authClient.waitlist.getStatus`      | `auth.api.getWaitlistStatus`      |
+| `POST /waitlist/leave`           | `authClient.waitlist.leave`          | `auth.api.leaveWaitlist`          |
+| `GET /waitlist/check-invite`     | `authClient.waitlist.checkInvite`    | `auth.api.checkWaitlistInvite`    |
+| `GET /waitlist/list-entries`     | `authClient.waitlist.listEntries`    | `auth.api.listWaitlistEntries`    |
+| `GET /waitlist/get-stats`        | `authClient.waitlist.getStats`       | `auth.api.getWaitlistStats`       |
+| `POST /waitlist/approve-entries` | `authClient.waitlist.approveEntries` | `auth.api.approveWaitlistEntries` |
+| `POST /waitlist/reject-entry`    | `authClient.waitlist.rejectEntry`    | `auth.api.rejectWaitlistEntry`    |
+| `POST /waitlist/delete-entry`    | `authClient.waitlist.deleteEntry`    | `auth.api.deleteWaitlistEntry`    |
+| `POST /waitlist/create-invite`   | `authClient.waitlist.createInvite`   | `auth.api.createWaitlistInvite`   |
+
+<Callout title="With the audit log">
+  With the [audit log](/docs/audit-log) plugin, approvals, rejections, and deleted entries are recorded there
+  too (see [Events from other plugins](/docs/audit-log#events-from-other-plugins)).
+</Callout>
+
+## Schema
+
+Table: `waitlistEntry`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the entry.", required: true },
+    email: {
+      type: "string",
+      description: "Trimmed and lowercased. Unique.",
+      required: true,
+    },
+    status: {
+      type: '"unconfirmed" | "pending" | "approved" | "rejected" | "registered"',
+      description: "Where the entry is. Indexed.",
+      required: true,
+    },
+    tokenHash: {
+      type: "string",
+      description: "SHA-256 hash of the token in the confirm, status, and leave links. Unique.",
+      required: true,
+    },
+    confirmationsSent: {
+      type: "number",
+      description: "Confirmation emails sent so far (at most 4, see [Double opt-in](#double-opt-in)).",
+      required: true,
+    },
+    inviteCodeHash: {
+      type: "string",
+      description: "SHA-256 hash of the invite code, while the entry is approved. Indexed.",
+    },
+    inviteExpiresAt: { type: "Date", description: "When the invite expires." },
+    metadata: { type: "string", description: "JSON-encoded `metadata` from the join request." },
+    approvedBy: { type: "string", description: "Id of the admin who approved the entry." },
+    approvedAt: { type: "Date", description: "When the entry was last approved." },
+    registeredAt: { type: "Date", description: "When the account was created." },
+    createdAt: { type: "Date", description: "When the email joined.", required: true },
+    updatedAt: {
+      type: "Date",
+      description:
+        "When the entry last changed. For unconfirmed entries, when the confirmation link was last sent.",
+      required: true,
+    },
+  }}
+/>
+
+To rename the table or its columns, use the `schema` option:
+
+```ts title="auth.ts"
+waitlist({
+  schema: {
+    waitlistEntry: {
+      modelName: "waitlist_entries",
+      fields: { createdAt: "created_at" },
+    },
+  },
+});
+```
+
+## Error codes
+
+Exported as `WAITLIST_ERROR_CODES` from both entry points, to compare with
+`error.code`:
+
+```ts
+import { WAITLIST_ERROR_CODES } from "@checodo/better-auth-waitlist/client";
+
+if (error?.code === WAITLIST_ERROR_CODES.EMAIL_NOT_APPROVED.code) {
+  // show "You're on the waitlist, we'll email you"
+}
+```
+
+| Code                                     | Status | When                                                                     |
+| ---------------------------------------- | ------ | ------------------------------------------------------------------------ |
+| `EMAIL_NOT_APPROVED`                     | 403    | Creating a user for an email that isn't approved                         |
+| `INVITE_CODE_REQUIRED`                   | 403    | Signing up without a code, with `requireInviteCode`                      |
+| `INVALID_INVITE_CODE`                    | 403    | Signing up with a code that isn't this email's valid invite, with `requireInviteCode` |
+| `INVALID_TOKEN`                          | 400    | Confirm, status, or leave with an unknown or expired token               |
+| `WAITLIST_FULL`                          | 403    | Joining or confirming while the waitlist holds `maxEntries`              |
+| `ENTRY_NOT_FOUND`                        | 404    | Rejecting or deleting an entry that doesn't exist                        |
+| `METADATA_TOO_LARGE`                     | 400    | Joining with more than 2,000 characters of JSON `metadata`               |
+| `YOU_ARE_NOT_ALLOWED_TO_MANAGE_WAITLIST` | 403    | Admin endpoints, for users who aren't admins                             |
+
+## Options
+
+<TypeTable
+  type={{
+    enabled: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Only let approved emails create an account. With `false`, the waitlist still collects entries but sign-up is open.",
+    },
+    confirmEmail: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Double opt-in: new entries stay `unconfirmed` until the confirmation link is opened. Requires `sendConfirmationEmail`; the plugin throws at startup without it.",
+    },
+    sendConfirmationEmail: {
+      type: "({ email, token, expiresAt }) => void | Promise<void>",
+      description:
+        "Sends the confirmation link for `confirmEmail`. Errors are logged.",
+    },
+    confirmationExpiresIn: {
+      type: "number",
+      default: "172800",
+      description:
+        "How long a confirmation link works, in seconds (2 days). Unconfirmed entries older than this are deleted.",
+    },
+    autoApprove: {
+      type: "boolean | (email: string) => boolean | Promise<boolean>",
+      default: "false",
+      description:
+        "Approve new entries right away (after confirmation), for all emails or per email.",
+    },
+    requireInviteCode: {
+      type: "boolean",
+      default: "false",
+      description:
+        "Require the invite code at sign-up, not just an approved email. See [Invite codes](#invite-codes).",
+    },
+    inviteExpiresIn: {
+      type: "number",
+      default: "604800",
+      description:
+        "How long an approval and its invite last, in seconds (7 days). `0` never expires.",
+    },
+    sendInvite: {
+      type: "({ email, inviteCode, expiresAt, token }) => void | Promise<void>",
+      description:
+        "Called when an entry is approved or someone is invited directly. Send the invite email here. Errors are logged.",
+    },
+    onJoin: {
+      type: "(entry) => void | Promise<void>",
+      description:
+        "Called when an email is added to the waitlist: after confirmation with `confirmEmail`, otherwise right after joining. `entry.token` is the plain token, e.g. for a status link. Errors are logged.",
+    },
+    onReject: {
+      type: "(entry) => void | Promise<void>",
+      description: "Called when an entry is rejected, with the entry as admins see it (no token). Errors are logged.",
+    },
+    allow: {
+      type: "string[]",
+      default: "[]",
+      description: "Emails and domains (including subdomains) that may always sign up.",
+    },
+    bypass: {
+      type: "(context: GenericEndpointContext | null) => boolean",
+      default: 'context?.path === "/admin/create-user"',
+      description:
+        "Lets a user be created without passing the waitlist, based on the request. `context` is `null` for users created by server code outside a request.",
+    },
+    maxEntries: {
+      type: "number",
+      default: "unlimited",
+      description:
+        "Stop accepting entries once the waitlist holds this many confirmed ones. See [Capacity](#capacity).",
+    },
+    adminRoles: {
+      type: "string[]",
+      default: '["admin"]',
+      description: "Roles that may manage the waitlist.",
+    },
+    adminUserIds: {
+      type: "string[]",
+      default: "[]",
+      description: "User ids that may manage the waitlist, whatever their role.",
+    },
+    schema: {
+      type: "{ waitlistEntry?: { modelName?, fields? } }",
+      description: "Rename the `waitlistEntry` table or its columns. See [Schema](#schema).",
+    },
+  }}
+/>

@@ -1,0 +1,56 @@
+{
+  "name": "@checodo/better-auth-plugins",
+  "description": "Small, typed plugins that install and behave like the ones that ship with better-auth.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:checodo/better-auth-plugins.git"
+  },
+  "bugs": {
+    "url": "https://github.com/checodo/better-auth-plugins/issues"
+  },
+  "author": {
+    "name": "Clas Heinemeyer",
+    "email": "the.checodo@gmail.com",
+    "url": "https://checodo.dev"
+  },
+  "contributors": [],
+  "scripts": {
+    "prepare": "lefthook install",
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "typecheck": "turbo run typecheck",
+    "lint": "biome check . --error-on-warnings",
+    "lint:fix": "biome check --write .",
+    "lint:packages": "turbo run lint:package --filter=./packages/*",
+    "check": "node scripts/check-versions.mts && node scripts/check-docs.mts && biome check . --error-on-warnings && turbo run typecheck test build lint:package",
+    "check:docs": "node scripts/check-docs.mts",
+    "check:versions": "node scripts/check-versions.mts",
+    "smoke": "turbo run build --filter=./packages/* && node scripts/smoke-consumer.mts",
+    "format": "biome format --write .",
+    "changeset": "changeset",
+    "deps:update": "pnpm update --recursive --interactive",
+    "deps:latest": "pnpm update --recursive --interactive --latest",
+    "skills:update": "pnpm dlx skills update",
+    "clean": "rm -rf ./.turbo && turbo run clean --output-logs=errors-only",
+    "reset": "pnpm run clean && rm -rf ./node_modules"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@biomejs/biome": "^2.6.6",
+    "@changesets/cli": "^3.0.3",
+    "@types/node": "catalog:",
+    "lefthook": "^2.2.2",
+    "publint": "^0.3.25",
+    "turbo": "^2.11.10",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": "^24.22.2",
+    "pnpm": "^12.18.0"
+  },
+  "packageManager": "pnpm@12.21.0",
+  "private": true
+}

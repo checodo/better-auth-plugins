@@ -1,0 +1,93 @@
+---
+title: Combining plugins
+description: Use several plugins together, and with better-auth's official plugins.
+---
+
+The plugins are independent packages, but they know about each other: the
+blocklist checks waitlist emails, the waitlist and referral codes ride on
+the same sign-up request, and the audit log records what the others do.
+None of them depends on another; each finds the others the way
+better-auth's own plugins do, with `ctx.context.getPlugin(...)`.
+
+## All plugins in one config
+
+```ts title="auth.ts"
+import { auditLog } from "@checodo/better-auth-audit-log";
+import { authentication } from "@checodo/better-auth-authentication";
+import { blocklist } from "@checodo/better-auth-blocklist";
+import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
+import { referral } from "@checodo/better-auth-referral";
+import { waitlist } from "@checodo/better-auth-waitlist";
+import { betterAuth } from "better-auth";
+import { admin, organization, username } from "better-auth/plugins";
+
+export const auth = betterAuth({
+  emailAndPassword: { enabled: true },
+  plugins: [
+    blocklist({
+      email: { domains: disposableEmailDomains },
+      username: { values: reservedUsernames },
+      organization: { values: reservedUsernames },
+    }),
+    waitlist({
+      sendConfirmationEmail: async ({ email, token }) => {
+        await sendEmail({ to: email, subject: "Confirm", text: `/waitlist?confirm=${token}` });
+      },
+      sendInvite: async ({ email, inviteCode }) => {
+        await sendEmail({ to: email, subject: "You're in", text: `/sign-up?invite=${inviteCode}` });
+      },
+      // players of the gaming providers have placeholder emails
+      allow: ["steam.invalid", "epic.invalid", "xbox.invalid"],
+    }),
+    referral({ steps: ["email-verified"] }),
+    authentication({ steam: { apiKey: process.env.STEAM_API_KEY } }),
+    username(),
+    admin(),
+    organization(),
+    // last, so it sees what the other plugins did
+    auditLog({ retention: { days: 180 } }),
+  ],
+});
+```
+
+## Order
+
+Only the audit log cares where it is: put it **after** the other plugins,
+so its hooks see finished sign-ins and refusals. Framework helpers that must
+be last, such as `nextCookies()`, still go after it. The order of the
+others doesn't matter: their checks run in database hooks that all run
+before a user is created.
+
+## How they work together
+
+| Together                         | What happens                                                                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Blocklist + waitlist             | `/waitlist/join` and `/waitlist/create-invite` check the email, so a blocked address can't join or be invited only to fail at sign-up. |
+| Blocklist + referral             | A sign-up the blocklist refuses creates no referral and completes no step.                                                           |
+| Waitlist + referral              | Both codes come with the request that creates the user: `x-invite-code` and `x-referral-code` headers, or `additionalData` for social sign-in. |
+| Waitlist + authentication        | Steam, Epic, and Xbox players have placeholder emails, which are never on the waitlist: `allow` their domains, as above.              |
+| Blocklist + authentication       | Nobody can sign up with a placeholder domain (`EMAIL_DOMAIN_RESERVED`); blocklist rules apply to real emails as usual.                |
+| Audit log + any plugin           | Blocklist refusals and rule changes, waitlist approvals, and referrals are recorded, see [Events from other plugins](/docs/audit-log#events-from-other-plugins). |
+
+## Works with better-auth's plugins
+
+Every plugin is tested with the official plugins below. Users are checked
+when they are created, so a plugin that creates users its own way is
+covered as well.
+
+| Official plugin       | Blocklist                         | Waitlist                          | Referral                   | Audit log                                       |
+| --------------------- | --------------------------------- | --------------------------------- | -------------------------- | ----------------------------------------------- |
+| Social sign-in        | Checks the email                  | Gated; code in `additionalData`   | Code in `additionalData`   | Sign-up, sign-in, linked accounts               |
+| Magic link            | Checks the email                  | Gated                             | `x-referral-code` header   | Sign-in                                         |
+| Email OTP             | Checks sign-up and email changes  | Gated                             | `x-referral-code` header   | Sign-in, failed sign-in, password reset         |
+| Phone number          | Checks the generated email        | Gated; `allow` its domain         | `x-referral-code` header   | Failed sign-in, password reset                  |
+| Sign-In with Ethereum | Checks the email given            | Gated; `allow` its domain         | `x-referral-code` header   | Sign-up, sign-in                                |
+| Anonymous             | Guests pass                       | Gated; `bypass` it                | -                          | Sign-up, sign-in                                |
+| Username              | Checks usernames                  | -                                 | -                          | Failed sign-in by username                      |
+| Admin                 | Checks `createUser`               | `createUser` skips it             | -                          | Every admin action                              |
+| Organization          | Names, slugs, teams, invitations  | -                                 | -                          | Organizations, invitations, members, roles      |
+| Two-factor            | -                                 | -                                 | -                          | Second factor, turning it on and off            |
+
+The [authentication](/docs/authentication) providers also work with
+`lastLoginMethod` (the method is `steam`, `epic`, or `xbox`) and
+`multiSession`.

@@ -1,0 +1,254 @@
+---
+title: Authentication
+description: Sign in with Steam, Epic Games, and Xbox, like any built-in social provider.
+---
+
+The authentication plugin adds sign-in providers that better-auth doesn't
+ship itself, so far the gaming platforms Steam, Epic Games, and Xbox. They
+work exactly like better-auth's built-in social providers: you sign in with
+`signIn.social`, link with `linkSocial`, and the callback is better-auth's
+own `/callback/<provider>`. Account linking, `callbackURL` checks, state
+and CSRF protection, `disableSignUp`, and session handling are
+better-auth's, unchanged.
+
+This page covers what all providers share. Each provider has its own page
+for its credentials and options:
+
+| Provider                                      | Protocol                               | Credentials                                |
+| --------------------------------------------- | -------------------------------------- | ------------------------------------------ |
+| [Steam](/docs/authentication/steam)           | OpenID 2.0                             | None needed; an optional API key           |
+| [Epic Games](/docs/authentication/epic-games) | Epic Account Services (OpenID Connect) | Client id and secret                       |
+| [Xbox](/docs/authentication/xbox)             | Microsoft account, then Xbox Live      | Client id and secret, Xbox developers only |
+
+Players get a placeholder email that nobody else can claim, since these
+platforms share no email address (see
+[Placeholder emails](#placeholder-emails)).
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-authentication
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+Configure only the providers you use:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { authentication } from "@checodo/better-auth-authentication";
+
+export const auth = betterAuth({
+  plugins: [
+    authentication({
+      steam: { apiKey: process.env.STEAM_API_KEY },
+      epic: {
+        clientId: process.env.EPIC_CLIENT_ID!,
+        clientSecret: process.env.EPIC_CLIENT_SECRET!,
+      },
+      xbox: {
+        clientId: process.env.XBOX_CLIENT_ID!,
+        clientSecret: process.env.XBOX_CLIENT_SECRET!,
+      },
+    }),
+  ],
+});
+```
+
+The plugin adds no tables: users, accounts, and sessions are better-auth's
+own. Each provider's page says where to get its credentials.
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { authenticationClient } from "@checodo/better-auth-authentication/client";
+
+export const authClient = createAuthClient({
+  plugins: [authenticationClient()],
+});
+```
+
+It adds the plugin's error codes to the client; sign-in itself needs no
+new methods.
+
+</Step>
+</Steps>
+
+## Usage
+
+### Sign in
+
+```ts
+await authClient.signIn.social({ provider: "steam", callbackURL: "/dashboard" });
+await authClient.signIn.social({ provider: "epic", callbackURL: "/dashboard" });
+await authClient.signIn.social({ provider: "xbox", callbackURL: "/dashboard" });
+```
+
+Everything `signIn.social` accepts works: `errorCallbackURL`,
+`newUserCallbackURL`, `disableRedirect`, `requestSignUp`, and
+`additionalData` (read by other plugins, such as a
+[referral code](/docs/referral#sign-up-with-a-code)).
+
+### Link an account
+
+Signed-in users can link a provider account to their user:
+
+```ts
+await authClient.linkSocial({ provider: "steam", callbackURL: "/settings" });
+```
+
+better-auth only links an account when the provider is trusted or vouches
+for a verified email, and when the emails match. These platforms share no
+email, so allow linking for them:
+
+```ts title="auth.ts"
+betterAuth({
+  account: {
+    accountLinking: {
+      trustedProviders: ["steam", "epic", "xbox"],
+      allowDifferentEmails: true,
+    },
+  },
+});
+```
+
+This is safe for these providers: linking still needs the signed-in user
+to prove they own the provider account, and their placeholder emails can't
+match another user (see below). Without it, linking fails with
+`error=unable_to_link_account`.
+
+<Callout type="warn" title="Keep the placeholder email when providers are trusted">
+  A trusted provider signs a user into an **existing** account with the same
+  email, without asking. That is only safe because the placeholder emails
+  belong to one provider account each. Don't set `email` or `emailVerified`
+  in `mapProfileToUser` from the profile (a display name, say, or anything
+  the player can change): with the provider trusted, a player who sets
+  their profile to `ceo@your-company.com` would be signed in as that user.
+
+  Both settings apply to every provider, not only these three:
+  `allowDifferentEmails` lets signed-in users link any social account,
+  whatever its email (they still have to sign in to it), so turn it on only
+  if that is fine for all your providers.
+</Callout>
+
+### Placeholder emails
+
+better-auth needs an email for every user, and Steam, Epic, and Xbox share
+none. Players get a placeholder made from their account id:
+
+| Provider | Placeholder                       |
+| -------- | --------------------------------- |
+| Steam    | `76561197960287930@steam.invalid` |
+| Epic     | `<Epic account id>@epic.invalid`  |
+| Xbox     | `<XUID>@xbox.invalid`             |
+
+- `.invalid` is reserved: these addresses can never receive email.
+  Password resets, verification emails, and magic links don't reach these
+  users; let them add a real email later (`changeEmail`) if you need one.
+- `emailVerified` is `false`.
+- Nobody can sign up with, or change their email to, a placeholder domain:
+  that fails with `EMAIL_DOMAIN_RESERVED`. Only the provider's own callback
+  (and your server code outside a request) can use it, so nobody can take
+  a user's placeholder before that user signs in.
+- A user who has a real email (they signed up with it and linked the provider
+  account, or changed their email later) keeps it: with
+  `overrideUserInfoOnSignIn`, the provider updates their name and image,
+  but never replaces their email with a placeholder.
+- Change the domain per provider with `emailDomain`, e.g.
+  `steam: { emailDomain: "steam.players.example.com" }`. Each provider needs
+  a domain of its own.
+
+To show something nicer than the placeholder, use the user's `name` (the
+Steam persona name, Epic display name, or gamertag).
+
+### Errors
+
+A failed sign-in redirects to better-auth's error page, or to
+`errorCallbackURL`, with an `error` query parameter: better-auth's own
+(`state_mismatch`, `unable_to_get_user_info`, ...), and for Steam two more,
+listed on the [Steam page](/docs/authentication/steam#errors). They are
+exported as `AUTHENTICATION_CALLBACK_ERRORS`.
+
+### Not supported
+
+- **Unity**: Unity Player Accounts signs players in to Unity games, not to
+  websites; Unity offers no OAuth or OpenID Connect sign-in for other
+  apps.
+- **Nintendo** and **PlayStation Network**: neither offers a public sign-in
+  for third-party websites.
+
+Providers are one file each in this plugin, so another provider is easy
+to add once a platform offers web sign-in.
+
+## Error codes
+
+Exported as `AUTHENTICATION_ERROR_CODES` from both entry points:
+
+| Code                    | Status | When                                                              |
+| ----------------------- | ------ | ----------------------------------------------------------------- |
+| `EMAIL_DOMAIN_RESERVED` | 400    | Signing up with, or changing an email to, a placeholder domain     |
+
+## Options
+
+<TypeTable
+  type={{
+    steam: {
+      type: "SteamOptions",
+      description: "Sign in with Steam. See [Steam options](/docs/authentication/steam#options).",
+    },
+    epic: {
+      type: "EpicOptions",
+      description: "Sign in with Epic Games. See [Epic Games options](/docs/authentication/epic-games#options).",
+    },
+    xbox: {
+      type: "XboxOptions",
+      description: "Sign in with Xbox. See [Xbox options](/docs/authentication/xbox#options).",
+    },
+  }}
+/>
+
+### Provider options
+
+Every provider accepts these, like better-auth's built-in providers:
+
+<TypeTable
+  type={{
+    disableSignUp: {
+      type: "boolean",
+      default: "false",
+      description: "Only existing users can sign in.",
+    },
+    disableImplicitSignUp: {
+      type: "boolean",
+      default: "false",
+      description: "New users must sign in with `requestSignUp: true`.",
+    },
+    overrideUserInfoOnSignIn: {
+      type: "boolean",
+      default: "false",
+      description: "Update the user's name and image from the provider on every sign-in.",
+    },
+    mapProfileToUser: {
+      type: "(profile) => user fields",
+      description:
+        "Change the user created from the provider's profile. Don't set `email` from the profile, see [Link an account](#link-an-account).",
+    },
+    emailDomain: {
+      type: "string",
+      default: '"<provider>.invalid"',
+      description: "Domain of the placeholder emails. See [Placeholder emails](#placeholder-emails).",
+    },
+  }}
+/>

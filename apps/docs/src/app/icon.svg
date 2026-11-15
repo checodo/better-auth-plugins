@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 284 284">
+  <title>better-auth-plugins</title>
+  <style>
+    rect.ink { fill: #171719; }
+    @media (prefers-color-scheme: dark) {
+      rect.ink { fill: #fafafa; }
+    }
+  </style>
+  <rect class="ink" x="0" y="0" width="84" height="84"/>
+  <rect class="ink" x="84" y="84" width="84" height="84"/>
+  <rect class="ink" x="0" y="168" width="84" height="84"/>
+  <rect x="168" y="0" width="84" height="84" fill="#A5F000"/>
+</svg>

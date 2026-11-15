@@ -1,0 +1,32 @@
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 43200
+
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
+  lefthook: true
+  rolldown: false
+
+permissions:
+  tsdown:
+    skills: true
+
+skills:
+  dirs:
+    - .agents/skills
+    - .claude/skills
+
+catalog:
+  "@better-auth/core": ^1.7.20
+  "@types/node": ^24.19.2
+  better-auth: ^1.7.20
+  typescript: ^5.9.3
+  vitest: ^5.1.0
+  zod: ^4.5.4

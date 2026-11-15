@@ -1,0 +1,17 @@
+{
+  "title": "better-auth-plugins",
+  "pages": [
+    "index",
+    "audit-log",
+    "authentication",
+    "blocklist",
+    "referral",
+    "waitlist",
+    "---Guides---",
+    "combining-plugins",
+    "database",
+    "faq",
+    "---More---",
+    "brand"
+  ]
+}

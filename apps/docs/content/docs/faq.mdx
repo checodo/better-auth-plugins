@@ -1,0 +1,44 @@
+---
+title: FAQ
+description: Common questions about better-auth-plugins.
+---
+
+## Is this part of better-auth?
+
+No. These are community plugins, made to look and feel like
+better-auth's own, but not made or reviewed by the better-auth team.
+Report problems in this project's repository, not to better-auth.
+
+## Which better-auth versions are supported?
+
+`better-auth` and `@better-auth/core` 1.7.20 or a later 1.x release. The
+packages declare this range as peer dependencies, and it is the version
+the tests run against.
+
+## Can I use them with CommonJS?
+
+The packages are ES modules only, like most of the current better-auth
+ecosystem. From CommonJS, load them with a dynamic `import()`.
+
+## Why can't phone number, wallet, or Steam users sign up with the waitlist on?
+
+They have generated emails, which are never on the waitlist. Put their
+domain in the waitlist's `allow`, or let their requests through with
+`bypass`, see [Sign-up](/docs/waitlist#sign-up).
+
+## Do invited organization members skip the waitlist?
+
+No. An organization invitation doesn't approve an email for the
+waitlist. Approve the invitee too (`createInvite` on the waitlist), or let
+the invitation's sign-up through with `bypass`.
+
+## Why isn't `auth.api.addMember` in the audit log?
+
+`addMember` is server-only: it has no URL, so no plugin hook sees it.
+Record the event yourself with
+[`recordAuditEvent`](/docs/audit-log#your-own-events) where you call it.
+
+## Where do I report a security problem?
+
+Privately, not in a public issue. See the repository's
+[security policy](https://github.com/checodo/better-auth-plugins/blob/main/SECURITY.md).

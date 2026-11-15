@@ -1,0 +1,40 @@
+# "Run workflow" (Actions > Deploy docs): deploys the docs as they are on
+# main, for docs-only fixes such as typos. Releases deploy the docs by
+# themselves (release.yml, job `docs`).
+#
+# Use it only when main has no docs for unreleased features: the docs must
+# match the latest published version. Vercel doesn't deploy main on its own
+# (apps/docs/vercel.json); pull requests still get preview deployments.
+name: Deploy docs
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy-docs
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Holds the deploy hook; only runs on main may use it.
+    environment: docs
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::The docs are deployed from main only."
+          exit 1
+
+      - name: Deploy the docs (Vercel deploy hook)
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "::error::No VERCEL_DEPLOY_HOOK secret in the docs environment."
+            exit 1
+          fi
+          curl --fail --silent --show-error --request POST "$VERCEL_DEPLOY_HOOK" > /dev/null

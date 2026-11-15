@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # "Run workflow" button (Actions > CI), e.g. to check `main` again after
+  # a settings change; a run that failed to start can't be re-run.
+  workflow_dispatch:
+
+# Only what CI needs: read the code. No step writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A new push to a PR replaces its running check; runs on main always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No step pushes, so don't leave a git token in the workspace for
+          # later steps (or dependencies' install scripts) to find.
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check package exports and types
+        run: pnpm lint:packages
+
+      - name: Check better-auth versions
+        run: pnpm check:versions
+
+      - name: Check docs against the code
+        run: pnpm check:docs
+
+      - name: Pack, install, and run the packages in a fresh app
+        run: pnpm smoke
+
+  # Fails a PR that changes a published package without a changeset.
+  # Docs-only and tooling-only PRs pass without one. Runs while the
+  # repository variable CHANGESETS_ENABLED is "true" (Settings > Secrets
+  # and variables > Actions > Variables). Skipped for Dependabot's PRs (a
+  # dependency update has no changeset) and for the "Version Packages" PR
+  # (release.yml), which removes the changesets.
+  changeset:
+    if: >-
+      github.event_name == 'pull_request'
+      && vars.CHANGESETS_ENABLED == 'true'
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+      && github.head_ref != 'changeset-release/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for a changeset
+        run: pnpm changeset status --since=origin/${{ github.base_ref }}

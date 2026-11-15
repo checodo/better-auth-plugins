@@ -1,0 +1,559 @@
+---
+title: Referral
+description: Referral codes, sign-up attribution, and reward steps.
+---
+
+The referral plugin gives users a code to share, records who signed up
+with whose code, and tells you when a referral counts, so you can reward
+it.
+
+- Attributes **every** way a user signs up: email and password, social
+  sign-in, magic link, email OTP.
+- Steps before a referral counts, such as a verified email or a first
+  purchase, so fake accounts don't earn rewards. Apps that send
+  verification emails require a verified email by default.
+- `onReferralCompleted` runs exactly once per referral: grant the reward
+  there.
+- Referrers see who they referred with masked emails; codes don't reveal
+  whose they are.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-referral
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { referral } from "@checodo/better-auth-referral";
+
+export const auth = betterAuth({
+  plugins: [
+    referral({
+      onReferralCompleted: async ({ referrerUserId }) => {
+        await grantCredit(referrerUserId);
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+The plugin adds the `referralCode`, `referral`, and `referralStep` tables
+(see [Schema](#schema)).
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { referralClient } from "@checodo/better-auth-referral/client";
+
+export const authClient = createAuthClient({
+  plugins: [referralClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Share a code
+
+Every user can have one code. Create it when they open your "invite
+friends" page, or for every new user with `createCodeOnSignUp: true`:
+
+```ts
+const { data } = await authClient.referral.createCode();
+// data: { code: "K7MPX2QD" } (the same code on every call)
+
+const shareUrl = `https://example.com/sign-up?ref=${data?.code}`;
+
+// read it without creating one
+const { data: existing } = await authClient.referral.getCode();
+// existing: { code: string | null }
+```
+
+Codes are 8 characters (`codeLength`) of consonants and digits, and
+case-insensitive. They have no look-alikes such as `0`/`O` and `1`/`I`,
+and no vowels, so a random code can't spell a word, offensive ones
+included. To use your own format, pass
+`generateCode`; collisions are retried.
+
+A user who wants a new code (because a link was shared too widely, say) can
+replace theirs. The old code and every link with it stop working at once;
+users who already signed up with it stay their referrals:
+
+```ts
+const { data } = await authClient.referral.regenerateCode();
+// data: { code: "R4TQW9HZ" }
+```
+
+### Sign up with a code
+
+Pass the code with the request that creates the user. It is read from the
+`x-referral-code` header, from `additionalData.referralCode` of a social
+sign-in, or from a `referralCode` field in the sign-up body:
+
+```ts
+// email and password
+await authClient.signUp.email(
+  { email, password, name },
+  { headers: { "x-referral-code": code } },
+);
+
+// social sign-in: the code survives the redirect to the provider
+await authClient.signIn.social({
+  provider: "github",
+  additionalData: { referralCode: code },
+});
+
+// magic link, email OTP, phone number, Sign-In with Ethereum, ...:
+// the header on the request that creates the user
+await authClient.signIn.emailOtp(
+  { email, otp },
+  { headers: { "x-referral-code": code } },
+);
+```
+
+The header is the typed way for better-auth's client. The `referralCode`
+body field is for plain HTTP requests, such as an HTML form posting to
+`/sign-up/email`.
+
+<Callout title="Auth server on another domain?">
+  `x-referral-code` is a custom header. If your app and your auth server
+  run on different origins, the browser only sends it when the server's
+  CORS configuration allows it (`Access-Control-Allow-Headers`). Add the
+  header there. Social sign-in (`additionalData`) and the body field need no
+  extra header.
+</Callout>
+
+#### Invalid codes
+
+A code that doesn't exist, whose owner has referred `maxReferralsPerUser`
+users already, or whose owner is banned (see [Fraud checks](#fraud-checks))
+is invalid. By default (`invalidCode: "ignore"`) the user signs
+up anyway, without a referral: a typo in an optional field shouldn't cost
+anyone their sign-up. With `invalidCode: "reject"` the sign-up fails with
+`INVALID_REFERRAL_CODE` instead.
+
+The sign-up itself can't carry a warning, so let the form check the code
+when it is submitted, and ask before signing up without one:
+
+```ts
+type SignUpForm = { email: string; password: string; name: string; code?: string };
+
+async function onSubmit({ email, password, name, code }: SignUpForm) {
+  if (code) {
+    const { data } = await authClient.referral.checkCode({ query: { code } });
+    if (!data?.valid && !confirm("This referral code is invalid. Sign up without it?")) return;
+  }
+  await authClient.signUp.email(
+    { email, password, name },
+    code ? { headers: { "x-referral-code": code } } : undefined,
+  );
+}
+```
+
+`checkCode` doesn't say whose code it is. Check on submit (or when the
+field loses focus), not on every keystroke: it is rate limited (see
+[Rate limits](#rate-limits)).
+
+A user is referred at most once, by the first code they sign up with.
+
+### Steps and rewards
+
+A referral starts `pending` when the referred user signs up, and becomes
+`completed` once every step in `steps` is done. Without steps, it completes
+at sign-up.
+
+<Callout type="warn" title="Rewards need at least email-verified">
+  If a referral completes at sign-up, anyone can earn rewards by signing
+  up fake accounts with their own code. Require at least
+  `"email-verified"`, so every referred account needs a real inbox.
+</Callout>
+
+The default depends on your auth config:
+
+| Your config                                      | Default `steps`      |
+| ------------------------------------------------ | -------------------- |
+| `emailVerification.sendVerificationEmail` is set | `["email-verified"]` |
+| otherwise                                        | `[]`                 |
+
+Without verification emails, email-and-password users can never verify,
+so requiring it would leave their referrals pending forever. If you verify
+emails another way, for example with the email OTP plugin's
+`overrideDefaultEmailVerification`, the default can't tell: set
+`steps: ["email-verified"]` yourself. Passing
+`steps` yourself always wins. When the default leaves `steps` empty and
+`onReferralCompleted` is set, the plugin logs a warning at startup. An
+explicit `steps: []` doesn't warn: that's a choice.
+
+```ts title="auth.ts"
+referral({
+  steps: ["email-verified", "first-purchase"],
+  onStepCompleted: ({ referral, step }) => {
+    console.log(`${referral.referredUserId} completed ${step}`);
+  },
+  onReferralCompleted: async (referral) => {
+    // runs once per referral
+    await grantCredit(referral.referrerUserId);
+  },
+});
+```
+
+- **`email-verified`** is recorded by the plugin when the referred user's
+  email is verified. Social sign-ins usually verify the email at once.
+- **Your own steps** are recorded by your server, for example in a payment
+  webhook:
+
+```ts title="server"
+await auth.api.completeReferralStep({
+  body: {
+    userId: order.userId,
+    step: "first-purchase",
+    metadata: { orderId: order.id }, // optional, stored as JSON
+  },
+});
+// { referral: { status, steps, ... } }, or { referral: null } if the user wasn't referred
+```
+
+`completeReferralStep` is server only: it has no HTTP route, so clients
+can't complete steps themselves. Each step counts once; recording it again
+changes nothing. Steps that aren't in `steps` fail with
+`UNKNOWN_REFERRAL_STEP`.
+
+### Your referrals
+
+Signed-in users see who they referred, newest first: their name and email.
+Emails are masked (`b***@example.com`) unless `maskEmails` is `false`, and
+names are left out with `hideNames: true`. Mention in your privacy policy
+what referrers see. The response has no user ids:
+
+```ts
+const { data } = await authClient.referral.listReferrals({
+  query: { status: "completed", limit: 20, offset: 0 }, // all optional
+});
+// data: {
+//   referrals: [{ id, status, steps, createdAt, completedAt, referredUser: { name, email } }],
+//   total,      // with the status filter
+//   completed,  // completed referrals in total
+// }
+```
+
+To not show referrers who they referred at all, turn the endpoint off with
+better-auth's `disabledPaths`:
+
+```ts title="auth.ts"
+betterAuth({
+  disabledPaths: ["/referral/list-referrals"],
+});
+```
+
+### Fraud checks
+
+Rewards make referrals worth faking. `steps` is the first line of defense:
+a referral only counts once the referred user has done something real.
+For more, decide per sign-up with `allowReferral`; returning `false` signs
+the user up without a referral:
+
+```ts title="auth.ts"
+referral({
+  allowReferral: async ({ referrerUserId, referredUser, context }) => {
+    // e.g. your own checks: same IP address, disposable email, ...
+    return !(await looksLikeSelfReferral(referrerUserId, referredUser, context?.headers));
+  },
+});
+```
+
+If `allowReferral` throws, the error is logged and the user signs up
+without a referral.
+
+Also consider:
+
+- `maxReferralsPerUser`, so one user can't earn unlimited rewards. It
+  counts across all their codes, so `regenerateCode` doesn't reset it, and
+  it holds when sign-ups with the same code happen at the same time: the
+  referral is checked again once the user is saved, and the earliest
+  referrals keep their places. A sign-up that loses the race is a normal
+  sign-up without a referral (`onReferral` doesn't run), even with
+  `invalidCode: "reject"`, since the user exists by then.
+- Banning fraudsters with better-auth's
+  [admin plugin](https://better-auth.com/docs/plugins/admin): a banned
+  user's code stops working until the ban ends, so new sign-ups no longer
+  count for them. Referrals they made before the ban can still complete,
+  so check the referrer in `onReferralCompleted` before paying out.
+- The [blocklist](/docs/blocklist) plugin with its disposable email
+  domains, so throwaway addresses can't sign up (and verify) at all. A
+  sign-up the blocklist stops creates no user, so no referral is recorded
+  and no reward is paid.
+- Granting rewards only for steps that cost the referred user something,
+  like a purchase.
+
+### Rate limits
+
+`/referral/check-code` is the only endpoint anyone can call. It is limited
+to 5 requests per minute per IP by better-auth's
+[rate limiter](https://better-auth.com/docs/concepts/rate-limit), which is
+on in production by default, so codes can't be guessed quickly. Change it
+with `rateLimit.customRules`:
+
+```ts title="auth.ts"
+betterAuth({
+  rateLimit: {
+    customRules: { "/referral/check-code": { window: 60, max: 10 } },
+  },
+});
+```
+
+<Callout type="warn" title="More than one server? Share the rate limit's storage">
+  better-auth counts requests in memory by default, per server process. With
+  several instances or serverless functions, every instance keeps its own
+  count, so the real limit is 5 per minute *per instance* and barely slows
+  down guessing. Store the counts where all instances see them, with
+  `rateLimit.storage: "database"` or `"secondary-storage"` (Redis, for
+  example). The limiter is also off in development unless you set
+  `rateLimit.enabled: true`.
+</Callout>
+
+### When things fail
+
+Referrals never break sign-up: if recording a referral fails, or a
+callback throws, the error is logged and the user is signed up anyway. The
+referral is recorded only after the sign-up has been saved: if the sign-up
+fails, no referral is recorded and no callback runs.
+
+<Callout title="With the audit log">
+  With the [audit log](/docs/audit-log) plugin, new and completed referrals are recorded there
+  too (see [Events from other plugins](/docs/audit-log#events-from-other-plugins)).
+</Callout>
+
+## Admins
+
+Users with one of `adminRoles` (the `role` field of better-auth's
+[admin plugin](https://better-auth.com/docs/plugins/admin)) or listed in
+`adminUserIds` can list all referrals, with full user ids. Requests
+without a session get a `401`, other users a `403`.
+
+```ts
+const { data } = await authClient.referral.listAllReferrals({
+  query: { referrerUserId: "user-id", status: "pending", limit: 20, offset: 0 },
+});
+// data: { referrals: [{ id, referrerUserId, referredUserId, code, status, steps, ... }], total }
+```
+
+| Endpoint                            | Client                                 | Server                           |
+| ----------------------------------- | -------------------------------------- | -------------------------------- |
+| `GET /referral/get-code`            | `authClient.referral.getCode`          | `auth.api.getReferralCode`       |
+| `POST /referral/create-code`        | `authClient.referral.createCode`       | `auth.api.createReferralCode`    |
+| `POST /referral/regenerate-code`    | `authClient.referral.regenerateCode`   | `auth.api.regenerateReferralCode` |
+| `GET /referral/check-code`          | `authClient.referral.checkCode`        | `auth.api.checkReferralCode`     |
+| `GET /referral/list-referrals`      | `authClient.referral.listReferrals`    | `auth.api.listReferrals`         |
+| `GET /referral/list-all-referrals`  | `authClient.referral.listAllReferrals` | `auth.api.listAllReferrals`      |
+| (server only)                       | -                                      | `auth.api.completeReferralStep`  |
+
+## Schema
+
+Table: `referralCode`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the code.", required: true },
+    userId: {
+      type: "string",
+      description: "The user the code belongs to. Unique; deleted with the user.",
+      required: true,
+    },
+    code: { type: "string", description: "The code, in uppercase. Unique.", required: true },
+    createdAt: { type: "Date", description: "When the code was created.", required: true },
+  }}
+/>
+
+Table: `referral`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the referral.", required: true },
+    referrerUserId: {
+      type: "string",
+      description: "The user whose code was used. Indexed; deleted with the user.",
+      required: true,
+    },
+    referredUserId: {
+      type: "string",
+      description: "The user who signed up. Unique; deleted with the user.",
+      required: true,
+    },
+    code: { type: "string", description: "The code used at sign-up.", required: true },
+    status: {
+      type: '"pending" | "completed"',
+      description: "Whether every step is done. Indexed.",
+      required: true,
+    },
+    completedAt: { type: "Date", description: "When the referral was completed." },
+    createdAt: { type: "Date", description: "When the referred user signed up.", required: true },
+  }}
+/>
+
+Table: `referralStep`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the step.", required: true },
+    referralId: {
+      type: "string",
+      description: "The referral. Unique together with `step`; deleted with the referral.",
+      required: true,
+    },
+    step: { type: "string", description: "The step, from `steps`.", required: true },
+    metadata: { type: "string", description: "JSON-encoded `metadata` from `completeReferralStep`." },
+    completedAt: { type: "Date", description: "When the step was completed.", required: true },
+  }}
+/>
+
+To rename the tables or their columns, use the `schema` option:
+
+```ts title="auth.ts"
+referral({
+  schema: {
+    referral: { modelName: "referrals", fields: { createdAt: "created_at" } },
+  },
+});
+```
+
+## Error codes
+
+Exported as `REFERRAL_ERROR_CODES` from both entry points, to compare with
+`error.code`:
+
+```ts
+import { REFERRAL_ERROR_CODES } from "@checodo/better-auth-referral/client";
+
+if (error?.code === REFERRAL_ERROR_CODES.INVALID_REFERRAL_CODE.code) {
+  // show "This invite link has expired"
+}
+```
+
+| Code                                    | Status | When                                                             |
+| --------------------------------------- | ------ | ---------------------------------------------------------------- |
+| `INVALID_REFERRAL_CODE`                 | 400    | Signing up with an unusable code, with `invalidCode: "reject"`   |
+| `UNKNOWN_REFERRAL_STEP`                 | 400    | `completeReferralStep` with a step that isn't in `steps`         |
+| `METADATA_TOO_LARGE`                    | 400    | `completeReferralStep` with more than 2,000 characters of JSON   |
+| `CODE_GENERATION_FAILED`                | 500    | `createCode` or `regenerateCode` when 5 generated codes in a row were taken |
+| `YOU_ARE_NOT_ALLOWED_TO_LIST_REFERRALS` | 403    | `listAllReferrals`, for users who aren't admins                  |
+
+## Options
+
+<TypeTable
+  type={{
+    steps: {
+      type: "string[]",
+      default: '["email-verified"] with verification emails, else []',
+      description:
+        'Steps a referral needs after sign-up before it completes, e.g. `["email-verified", "first-purchase"]`. `email-verified` is recorded automatically. See [Steps and rewards](#steps-and-rewards).',
+    },
+    onReferral: {
+      type: "(referral) => void | Promise<void>",
+      description: "Called when a referral is recorded at sign-up. Errors are logged.",
+    },
+    onStepCompleted: {
+      type: "({ referral, step }) => void | Promise<void>",
+      description: "Called when a step is completed for the first time. Errors are logged.",
+    },
+    onReferralCompleted: {
+      type: "(referral) => void | Promise<void>",
+      description:
+        "Called once per referral, when every step is done. Grant rewards here. Errors are logged.",
+    },
+    allowReferral: {
+      type: "({ referrerUserId, referredUser, code, context }) => boolean | Promise<boolean>",
+      description:
+        "Decides whether a sign-up with a valid code counts as a referral. `false` or an error signs the user up without one. See [Fraud checks](#fraud-checks).",
+    },
+    invalidCode: {
+      type: '"ignore" | "reject"',
+      default: '"ignore"',
+      description:
+        "What happens on sign-up with a code that doesn't exist or whose owner reached `maxReferralsPerUser`.",
+    },
+    maxReferralsPerUser: {
+      type: "number",
+      default: "unlimited",
+      description:
+        "How many users one user can refer, across all their codes (`regenerateCode` doesn't reset it).",
+    },
+    createCodeOnSignUp: {
+      type: "boolean",
+      default: "false",
+      description: "Give every new user a code when they sign up.",
+    },
+    codeLength: {
+      type: "number",
+      default: "8",
+      description: "Length of generated codes (consonants and digits), between 6 and 32.",
+    },
+    generateCode: {
+      type: "() => string | Promise<string>",
+      description:
+        'Your own code generator. 4 to 64 letters, digits, `-`, or `_`; stored in uppercase. Collisions are retried.',
+    },
+    maskEmails: {
+      type: "boolean",
+      default: "true",
+      description: "Mask referred users' emails in `listReferrals`.",
+    },
+    hideNames: {
+      type: "boolean",
+      default: "false",
+      description: "Leave referred users' names out of `listReferrals`.",
+    },
+    adminRoles: {
+      type: "string[]",
+      default: '["admin"]',
+      description: "Roles that may list all referrals.",
+    },
+    adminUserIds: {
+      type: "string[]",
+      default: "[]",
+      description: "User ids that may list all referrals, whatever their role.",
+    },
+    schema: {
+      type: "{ referralCode?, referral?, referralStep? }",
+      description: "Rename the tables or their columns. See [Schema](#schema).",
+    },
+  }}
+/>

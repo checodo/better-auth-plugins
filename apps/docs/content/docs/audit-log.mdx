@@ -1,0 +1,630 @@
+---
+title: Audit log
+description: A log of sign-ins, account changes, and admin actions.
+---
+
+The audit log plugin records security-relevant events: who signed in, how,
+from where, and what changed on their account. Users can see their own
+history; admins can see everyone's.
+
+- Records **every** sign-in method (email, social, magic link, OTP,
+  two-factor, ...) and failed sign-ins, without ever storing passwords or
+  tokens.
+- Records sign-ups, sign-outs, revoked sessions, password and email
+  changes, linked accounts, deleted users, and the actions of better-auth's
+  `admin` plugin, with the admin as the actor.
+- Events outlive the users they mention, `user-deleted` included.
+- Optional hash chain that shows when events were changed or deleted.
+- Pluggable: change or drop events with `beforeLog`, forward them with
+  `onEvent`, store them elsewhere with `storage`, delete old ones with
+  `retention`.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-audit-log
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+Add it after your other plugins. Plugins such as `twoFactor` finish a
+sign-in in their own hooks, and the audit log needs to see the result
+(only `nextCookies()` goes after it). The plugin warns at startup if it
+comes before `twoFactor`.
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { admin, twoFactor } from "better-auth/plugins";
+import { auditLog } from "@checodo/better-auth-audit-log";
+
+export const auth = betterAuth({
+  plugins: [
+    admin(),
+    twoFactor(),
+    auditLog({ retention: { days: 90 } }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+The plugin adds the `auditEvent` table, and `auditChain` with the
+[hash chain](#hash-chain) (see [Schema](#schema)). With
+custom [storage](#storage), there is no table.
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { auditLogClient } from "@checodo/better-auth-audit-log/client";
+
+export const authClient = createAuthClient({
+  plugins: [auditLogClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Events
+
+Each event has a `type`, a `status` (`success` or `failure`), a
+`severity`, the user it is about (`userId`) and the user who did it
+(`actorUserId`): the user themselves, an admin, or nobody (a failed
+sign-in).
+
+| Type                | Recorded when                                                          | Severity |
+| ------------------- | ---------------------------------------------------------------------- | -------- |
+| `sign-up`           | A user is created, by any method. `metadata.method`: `email`, `github`, `admin`, ... | low |
+| `sign-in`           | A session is created by signing in, by any method. `metadata.method` as above | low |
+| `sign-in` (failure) | Email, username, phone number, email OTP, or two-factor sign-in fails. `metadata.identifier`: see [Failed sign-ins](#failed-sign-ins) | medium |
+| `sign-out`          | The user signs out                                                     | low      |
+| `session-revoked`   | The user revokes a session, all sessions, or the other sessions (`metadata.scope`) | medium |
+| `password-changed`  | The user changes their password                                        | medium   |
+| `password-reset`    | The user resets their password with a reset link, an email OTP, or a phone number OTP | medium |
+| `email-changed`     | The user's email changes through any endpoint (change email, its verification link, an admin update, ...). `metadata.email` is the new one | medium |
+| `email-verified`    | The user verifies their email with a link or an OTP                    | low      |
+| `account-linked`    | An account (`metadata.providerId`) is linked to an existing user       | medium   |
+| `account-unlinked`  | The user unlinks an account                                            | medium   |
+| `two-factor-enabled` | The user turns two-factor on (two-factor plugin), when the first code is verified | medium |
+| `two-factor-disabled` | The user turns two-factor off                                         | high     |
+| `user-deleted`      | A user is deleted, by themselves or an admin                           | high     |
+| `admin.<action>`    | An admin plugin action: `create-user`, `update-user`, `set-role`, `set-user-password`, `ban-user`, `unban-user`, `impersonate-user`, `stop-impersonating`, `revoke-user-session`, `revoke-user-sessions`, `remove-user` | high; `set-role`, `set-user-password`, `impersonate-user` critical |
+| `organization.<action>` | An organization plugin action, see [Organizations](#organizations) | low to high |
+
+A few details:
+
+- A sign-up that signs the user in records `sign-up` and `sign-in`.
+- A two-factor sign-in is recorded once, when the second factor is
+  verified (`metadata.method: "two-factor"`).
+- New session cookies for a user who is already signed in (password
+  change, enabling two-factor, impersonation) aren't sign-ins.
+- Admin actions are recorded on failure too, e.g. a user who isn't an
+  admin trying to change roles, with the error code.
+- The first account of a new user (the password of an email sign-up, the
+  GitHub account of a GitHub sign-up) is part of the `sign-up`, not an
+  `account-linked`. "First" means created within 10 seconds of the user,
+  in practice the same request; an account linked faster than that after
+  signing up isn't recorded as `account-linked`.
+- Database changes made by your own server code outside a request (for
+  example `internalAdapter.updateUser`) aren't recorded, except sign-ups,
+  deleted users, and linked accounts.
+- Every event can have the `sessionId`, the session's active
+  `organizationId` (organization plugin), the IP address, and the user
+  agent.
+
+### Organizations
+
+With better-auth's [organization plugin](https://better-auth.com/docs/plugins/organization),
+these are recorded too, on success and on failure (a member who may not
+change roles trying to, with the error code). `organizationId` is the
+organization the action is about; `actorUserId` is who did it.
+
+| Type                                    | Recorded when                                         | `userId`                 | `metadata`                          | Severity |
+| --------------------------------------- | ----------------------------------------------------- | ------------------------ | ----------------------------------- | -------- |
+| `organization.created`                  | `/organization/create`                                | the creator              | `name`, `slug`                      | low      |
+| `organization.updated`                  | `/organization/update`                                | the actor                | `fields` changed                    | low      |
+| `organization.deleted`                  | `/organization/delete`                                | the actor                | -                                   | high     |
+| `organization.invitation-created`       | `/organization/invite-member`                         | the inviter              | `invitationId`, `email`, `role`     | low      |
+| `organization.invitation-accepted`      | `/organization/accept-invitation`                     | the new member           | `invitationId`, `memberId`, `role`  | low      |
+| `organization.invitation-rejected`      | `/organization/reject-invitation`                     | the invitee              | `invitationId`                      | low      |
+| `organization.invitation-canceled`      | `/organization/cancel-invitation`                     | the actor                | `invitationId`, `email`             | low      |
+| `organization.member-role-changed`      | `/organization/update-member-role`                    | the member               | `memberId`, `role`                  | high     |
+| `organization.member-removed`           | `/organization/remove-member`                         | the removed member       | `memberId`                          | medium   |
+| `organization.member-left`              | `/organization/leave`                                 | the member               | -                                   | low      |
+
+`auth.api.addMember` is server-only (it has no URL), so hooks never see
+it: record it yourself with [`recordAuditEvent`](#your-own-events) if you
+need it.
+
+### Failed sign-ins
+
+A failed sign-in is recorded with its error code, for the user whose email
+(or username, or phone number) was entered, so users see attempts on
+their account. Passwords are never stored, and because people sometimes
+type their password into the email or username field, the entered value is
+only kept as `metadata.identifier` when it is clearly an identifier: a
+well-formed email address or phone number, or the username of an existing
+user.
+
+better-auth's [rate limiter](https://better-auth.com/docs/concepts/rate-limit),
+on in production by default, allows 3 sign-in requests per 10 seconds per
+IP address, which also limits how fast failed attempts can fill the log.
+
+### Your events
+
+Signed-in users list their own events, newest first:
+
+```ts
+const { data } = await authClient.auditLog.listEvents({
+  query: {
+    type: "sign-in", // all optional
+    status: "failure",
+    from: new Date(Date.now() - 30 * 86_400_000),
+    limit: 20,
+    offset: 0,
+  },
+});
+// data: { events: [{ id, type, status, severity, ipAddress, userAgent, createdAt, ... }], total }
+```
+
+That makes a "recent activity" page easy: where and when the account was
+used, and failed attempts to sign in to it.
+
+Users only see the IP address, user agent, and session of what they did
+themselves. For events someone else caused on their account (an admin
+banning them, a failed sign-in with their email), those fields are `null`
+in their list; admins see them.
+
+### Your own events
+
+Record events of your app with the server-only `recordAuditEvent`. It has
+no HTTP route, so clients can't write to the log:
+
+```ts title="server"
+await auth.api.recordAuditEvent({
+  body: {
+    type: "billing.plan-changed", // letters, digits, ".", "-", "_"
+    userId: user.id,
+    actorUserId: user.id,
+    severity: "medium", // optional
+    metadata: { from: "free", to: "pro" }, // optional, up to 4,000 characters of JSON
+  },
+  headers: request.headers, // optional: records the IP address and user agent
+});
+// { event } (or { event: null } if `events` or `beforeLog` dropped it)
+```
+
+To record other endpoints, map their paths to event types with `paths`.
+The signed-in user is the event's user and actor:
+
+```ts title="auth.ts"
+auditLog({
+  paths: {
+    "/organization/delete": "organization.deleted",
+    "/api-key/create": "api-key.created",
+  },
+});
+```
+
+### Events from other plugins
+
+This repository's other plugins record their events in the audit log when
+you use it; nothing to configure. They find it the way better-auth's own
+plugins find each other (`ctx.context.getPlugin("audit-log")`), so they
+don't depend on it.
+
+| Type                     | Plugin                         | Recorded when                                          | Severity |
+| ------------------------ | ------------------------------ | ------------------------------------------------------ | -------- |
+| `blocklist.blocked`      | [Blocklist](/docs/blocklist)   | A sign-up or change is refused (`status: "failure"`). `metadata`: `target`, the `value`, and the `rule` | medium |
+| `blocklist.rule-created` | Blocklist                      | An admin creates a rule                                | high     |
+| `blocklist.rule-deleted` | Blocklist                      | An admin deletes a rule                                | high     |
+| `referral.created`       | [Referral](/docs/referral)     | A user signs up with a referral code (`userId`: the new user) | low |
+| `referral.completed`     | Referral                       | A referral completes (`userId`: the referrer it rewards) | medium |
+| `waitlist.approved`      | [Waitlist](/docs/waitlist)     | An entry is approved, by an admin or `autoApprove` (no actor). `metadata.email` | medium |
+| `waitlist.rejected`      | Waitlist                       | An admin rejects an entry                              | medium   |
+| `waitlist.entry-deleted` | Waitlist                       | An admin deletes an entry                              | medium   |
+
+A sign-up the blocklist refuses during a social sign-in is still recorded:
+better-auth creates social users in a database transaction, which the
+refusal rolls back, so the event is written after the transaction instead.
+
+Your own plugins can do the same with the plugin's `recordEvent`. It fills
+in the signed-in user as actor, the session, the IP address, and the user
+agent from the current request, and never throws:
+
+```ts title="my-plugin.ts"
+await ctx.context.getPlugin("audit-log")?.recordEvent({
+  type: "my-plugin.thing-done",
+  userId: user.id,
+  metadata: { thingId },
+});
+```
+
+### Which events
+
+Record a subset with `events`; `group.*` matches every type of a group:
+
+```ts title="auth.ts"
+auditLog({
+  events: ["sign-in", "password-changed", "admin.*"],
+  severity: { "sign-in": "medium" }, // override the built-in severities
+});
+```
+
+### Privacy
+
+Audit logs hold personal data: IP addresses, user agents, emails. Mention
+them in your privacy policy and keep them only as long as you need
+(see [Retention](#retention)).
+
+- Metadata keys that look like secrets (`password`, `token`, `secret`,
+  `apiKey`, `otp`, ...) are always replaced with `[redacted]`.
+- `captureIp: false` and `captureUserAgent: false` turn either off.
+- Events are kept when a user is deleted, so the log still shows what
+  happened. To honor an erasure request, delete the rows whose `userId` or
+  `actorUserId` is that user (or pseudonymize them) in the `auditEvent`
+  table. With the [hash chain](#hash-chain), verification then reports
+  those events; keep a note of which ones you erased.
+- User agents and metadata are whatever the client sent: escape them when
+  you display them (React does this for you).
+- `beforeLog` changes or drops an event before it is stored, for example
+  to shorten IP addresses:
+
+```ts title="auth.ts"
+auditLog({
+  beforeLog: (event) => {
+    if (event.type === "sign-out") return null; // drop
+    return { ...event, ipAddress: event.ipAddress?.replace(/\.\d+$/, ".0") ?? null };
+  },
+});
+```
+
+The IP address follows better-auth's
+[`advanced.ipAddress`](https://better-auth.com/docs/reference/options#advanced)
+rules: the `ipAddressHeaders` you configure (default `x-forwarded-for`),
+`trustedProxies`, and `disableIpTracking`. Like the IP address better-auth
+stores on sessions, an IPv6 address is shortened to its network
+(`ipv6Subnet`, default 64 bits, so `2001:db8::1` is stored as
+`2001:0db8:0000:0000:0000:0000:0000:0000`). Set `ipv6Subnet: 128` to keep
+full addresses, which also makes rate limiting count each IPv6 address
+separately.
+
+### Forwarding events
+
+`onEvent` gets every stored event, for example to send it to a SIEM or to
+alert on critical ones:
+
+```ts title="auth.ts"
+auditLog({
+  onEvent: async (event) => {
+    if (event.severity === "critical") await alertSecurityTeam(event);
+  },
+});
+```
+
+### Storage
+
+Events go to the `auditEvent` table by default. To keep them elsewhere,
+pass an object with `write`, `read`, and `deleteOlderThan`; the table is
+then not created. `memoryStorage()` keeps events in memory, for tests:
+
+```ts title="auth.test.ts"
+import { auditLog, memoryStorage } from "@checodo/better-auth-audit-log";
+import { betterAuth } from "better-auth";
+import { expect } from "vitest";
+
+const storage = memoryStorage();
+const auth = betterAuth({ plugins: [auditLog({ storage })] });
+// ...
+expect(storage.events.map((event) => event.type)).toContain("sign-in");
+```
+
+### Retention
+
+<Callout type="warn" title="Events are kept forever by default">
+  Without `retention`, every IP address, user agent, and failed sign-in
+  identifier stays in the log indefinitely. Data protection laws such as
+  the GDPR expect personal data to be kept only as long as needed, so set
+  a retention period that fits your purpose (90 days to a year is common
+  for security logs), and say so in your privacy policy.
+</Callout>
+
+Events are kept forever unless you set `retention`. With
+`retention: { days: 90 }`, events older than 90 days are deleted in the
+background, at most once an hour (`sweepInterval`, in seconds), started by
+a recorded event. On serverless platforms, configure better-auth's
+`advanced.backgroundTasks` so the sweep can finish, or delete from a cron
+job with the server-only `deleteExpiredAuditEvents`:
+
+```ts title="cron.ts"
+const { deleted } = await auth.api.deleteExpiredAuditEvents({
+  body: { days: 90 }, // optional with `retention`
+});
+```
+
+### Hash chain
+
+Anyone who can write to your database can change or delete audit events
+without a trace. With `hashChain: true`, every event gets a link in the
+`auditChain` table: a sequence number and an HMAC-SHA256 hash over the
+event and the previous link's hash. Changing or deleting an event, or a
+link, breaks the chain from there on, and `verifyAuditChain` shows where:
+
+```ts title="auth.ts"
+auditLog({
+  hashChain: true, // keyed with better-auth's secret
+  // or a key of its own, kept out of the database (at least 32 characters):
+  // hashChain: { secret: process.env.AUDIT_CHAIN_SECRET },
+});
+```
+
+```ts title="verify-audit-log.ts"
+const result = await auth.api.verifyAuditChain({});
+// {
+//   valid: false,
+//   checked: 1832,                      // links checked
+//   firstSequence: 1, lastSequence: 1832,
+//   lastHash: "9f2c...",
+//   problems: [{ sequence: 1204, eventId: "...", problem: "hash-mismatch" }],
+//   unchainedEvents: 0,
+// }
+```
+
+| Problem         | Meaning                                                        |
+| --------------- | -------------------------------------------------------------- |
+| `hash-mismatch` | The event (or its link) was changed after it was written       |
+| `missing-event` | The event was deleted, its link wasn't                         |
+| `sequence-gap`  | Links before this one were deleted, usually with their events  |
+| `broken-link`   | The link doesn't continue the previous link's hash             |
+
+`unchainedEvents` counts events stored since the first link that have no
+link: written into the table directly, or whose link failed (that error is
+logged). `verifyAuditChain` is server only and reads every link, so run it
+from a scheduled job, not on requests.
+
+What it does and doesn't protect against:
+
+- **The key matters.** Hashes are keyed, so someone who can only write to
+  the database can't recompute them for a changed event. Someone who also
+  has the key can. A key of its own, stored apart from the database, keeps
+  the two apart. Changing the key (or better-auth's secret, if you use it)
+  makes every existing link fail verification.
+- **The newest events.** Deleting the newest events and their links leaves
+  a shorter, valid chain, which verification can't tell apart from one
+  that was never longer. Store `lastHash` and `lastSequence` somewhere
+  else now and then (a log service, a ticket, an email) and compare them
+  with a later verification.
+- **The oldest events.** Retention deletes the oldest events with their
+  links; the chain then starts at `firstSequence`. Someone who deletes the
+  oldest events by hand leaves the same picture, so verification alone
+  can't tell it from retention. Compare `firstSequence` with what your
+  retention period should have left.
+- **Order.** Concurrent writers, even on several servers, get one sequence
+  number each through a unique index: the chain can't fork. Writing an
+  event takes a few more queries.
+- **Very heavy write load.** A writer that loses the race for a sequence
+  number tries again, up to 20 times. Under very heavy concurrent writing
+  it can run out of tries: the event is still stored, the error is logged,
+  and verification reports it in `unchainedEvents` (so `valid` is
+  `false`), not as tampering.
+- **Events before the chain.** Events stored before you turned it on have
+  no links and aren't checked.
+
+It needs the default database storage; with custom `storage`, the plugin
+refuses to start.
+
+### Running on several servers
+
+The log itself lives in the database, so any number of servers can write
+to it and read from it. A few things are kept in each server process:
+
+- **Sign-up or linked account.** To record the first account of a new user
+  as part of the sign-up rather than as `account-linked`, the plugin
+  remembers new users for 10 seconds. The user and their first account are
+  created in the same request, so this works on any number of servers.
+- **Retention sweeps.** Every process sweeps at most once per
+  `sweepInterval`, so with several processes the database sees a few more
+  (harmless) deletes. To sweep exactly once, leave `retention` unset and
+  call `deleteExpiredAuditEvents` from one cron job.
+- **Order within a millisecond.** Each process makes sure its own events
+  get increasing timestamps, so a sign-up lists before its sign-in. Events
+  from different servers in the same millisecond can list in either order.
+- **`memoryStorage()`** keeps events per process. It is for tests.
+
+### When things fail
+
+The audit log never breaks authentication: if storing an event fails, or
+`onEvent` throws, the error is logged and the request goes on. If
+`beforeLog` throws, the event is dropped and the error logged, so a broken
+pseudonymization never stores raw data. With better-auth's
+`advanced.backgroundTasks`, events are stored in the background, so they
+don't slow down responses.
+
+## Admins
+
+Users with one of `adminRoles` (the `role` field of better-auth's
+[admin plugin](https://better-auth.com/docs/plugins/admin)) or listed in
+`adminUserIds` can list every user's events, and filter by `userId` and
+`actorUserId`. Other users get a `403` for those filters; requests without
+a session get a `401`.
+
+```ts
+const { data } = await authClient.auditLog.listEvents({
+  query: { actorUserId: "admin-user-id", type: "admin.ban-user" },
+});
+```
+
+| Endpoint                      | Client                          | Server                              |
+| ----------------------------- | ------------------------------- | ----------------------------------- |
+| `GET /audit-log/list-events`  | `authClient.auditLog.listEvents` | `auth.api.listAuditEvents`          |
+| (server only)                 | -                               | `auth.api.recordAuditEvent`         |
+| (server only)                 | -                               | `auth.api.deleteExpiredAuditEvents` |
+| (server only)                 | -                               | `auth.api.verifyAuditChain`         |
+
+## Schema
+
+Table: `auditEvent`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the event.", required: true },
+    type: { type: "string", description: "The event type. Indexed.", required: true },
+    status: { type: '"success" | "failure"', description: "Whether it succeeded.", required: true },
+    severity: {
+      type: '"low" | "medium" | "high" | "critical"',
+      description: "How much it matters.",
+      required: true,
+    },
+    userId: {
+      type: "string",
+      description: "The user the event is about. Indexed; not a foreign key, so it outlives the user.",
+    },
+    actorUserId: { type: "string", description: "The user who did it. Indexed." },
+    sessionId: { type: "string", description: "The session of the request." },
+    organizationId: { type: "string", description: "The session's active organization." },
+    ipAddress: { type: "string", description: "The client's IP address." },
+    userAgent: { type: "string", description: "The client's user agent, up to 512 characters." },
+    errorCode: { type: "string", description: "The error code of a failed request." },
+    metadata: { type: "string", description: "JSON-encoded details, redacted." },
+    createdAt: { type: "Date", description: "When it happened. Indexed.", required: true },
+  }}
+/>
+
+Table: `auditChain`, only with [`hashChain`](#hash-chain)
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the link.", required: true },
+    sequence: { type: "number", description: "1, 2, 3, ... Unique.", required: true },
+    eventId: {
+      type: "string",
+      description: "The event. Not a foreign key, so a deleted event shows as missing.",
+      required: true,
+    },
+    previousHash: { type: "string", description: "The previous link's hash.", required: true },
+    hash: {
+      type: "string",
+      description: "HMAC-SHA256 of the event, `sequence`, and `previousHash`.",
+      required: true,
+    },
+    createdAt: { type: "Date", description: "The event's `createdAt`. Indexed.", required: true },
+  }}
+/>
+
+To rename the tables or their columns, use the `schema` option:
+
+```ts title="auth.ts"
+auditLog({
+  schema: { auditEvent: { modelName: "audit_events", fields: { createdAt: "created_at" } } },
+});
+```
+
+## Error codes
+
+Exported as `AUDIT_LOG_ERROR_CODES` from both entry points, to compare
+with `error.code`:
+
+| Code                                             | Status | When                                                         |
+| ------------------------------------------------ | ------ | ------------------------------------------------------------ |
+| `YOU_ARE_NOT_ALLOWED_TO_LIST_OTHER_USERS_EVENTS` | 403    | `listEvents` with another `userId`, or `actorUserId`, for users who aren't admins |
+| `METADATA_TOO_LARGE`                             | 400    | `recordAuditEvent` with more than 4,000 characters of JSON   |
+| `RETENTION_NOT_CONFIGURED`                       | 400    | `deleteExpiredAuditEvents` without `days` or `retention`     |
+| `HASH_CHAIN_NOT_ENABLED`                         | 400    | `verifyAuditChain` without the `hashChain` option            |
+
+## Options
+
+<TypeTable
+  type={{
+    events: {
+      type: "string[]",
+      default: "every event",
+      description: 'Event types to record; `group.*` matches a group, e.g. `["sign-in", "admin.*"]`.',
+    },
+    paths: {
+      type: "Record<string, string>",
+      description: "Extra endpoints to record, by path, with their event type.",
+    },
+    severity: {
+      type: 'Record<string, "low" | "medium" | "high" | "critical">',
+      description: "Severity per event type, overriding the built-in one.",
+    },
+    captureIp: { type: "boolean", default: "true", description: "Store the client's IP address." },
+    captureUserAgent: {
+      type: "boolean",
+      default: "true",
+      description: "Store the client's user agent.",
+    },
+    beforeLog: {
+      type: "(event) => event | null | Promise<event | null>",
+      description: "Change an event, or return `null` to drop it. Errors drop the event.",
+    },
+    onEvent: {
+      type: "(event) => void | Promise<void>",
+      description: "Called with every stored event. Errors are logged.",
+    },
+    storage: {
+      type: "{ write, read, deleteOlderThan }",
+      default: "the auditEvent table",
+      description: "Where to keep events. See [Storage](#storage).",
+    },
+    retention: {
+      type: "{ days: number; sweepInterval?: number }",
+      default: "keep forever",
+      description: "Delete events older than `days`, at most once per `sweepInterval` seconds (default 3600).",
+    },
+    hashChain: {
+      type: "boolean | { secret?: string }",
+      default: "false",
+      description:
+        "Chain events with keyed hashes to detect changes. `true` uses better-auth's secret. See [Hash chain](#hash-chain).",
+    },
+    adminRoles: {
+      type: "string[]",
+      default: '["admin"]',
+      description: "Roles that may list every user's events.",
+    },
+    adminUserIds: {
+      type: "string[]",
+      default: "[]",
+      description: "User ids that may list every user's events, whatever their role.",
+    },
+    schema: {
+      type: "{ auditEvent?, auditChain? }",
+      description: "Rename the tables or their columns. See [Schema](#schema).",
+    },
+  }}
+/>

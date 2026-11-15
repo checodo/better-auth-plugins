@@ -1,0 +1,97 @@
+---
+title: Xbox
+description: Sign in with Xbox (Microsoft account, then Xbox Live), for Xbox developers.
+---
+
+Xbox sign-in uses a Microsoft account, then Xbox Live. Install and set up
+the [authentication plugin](/docs/authentication) first; this page covers
+what is specific to Xbox.
+
+<Callout type="warn" title="Xbox developers only">
+  In practice, Microsoft allows the `xboxlive.signin` scope only for apps
+  enrolled in the Xbox developer program (ID@Xbox and partners); other apps
+  report an "Invalid app registration" error. Without access, consider Microsoft sign-in through
+  better-auth's `microsoft` provider instead; it signs in with the same
+  account, without Xbox data.
+</Callout>
+
+## Get your credentials
+
+This follows Microsoft's
+[Xbox services sign-in for title websites](https://learn.microsoft.com/en-us/gaming/gdk/docs/services/fundamentals/s2s-auth-calls/service-authentication/live-website-authentication):
+
+1. Register an app in Microsoft Entra ID with **Personal Microsoft
+   accounts only** and the redirect URL
+   `https://<your app>/api/auth/callback/xbox`.
+2. Create a client secret; use the application id and secret as
+   `clientId` and `clientSecret`.
+
+## Configure the provider
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { authentication } from "@checodo/better-auth-authentication";
+
+export const auth = betterAuth({
+  plugins: [
+    authentication({
+      xbox: {
+        clientId: process.env.XBOX_CLIENT_ID!,
+        clientSecret: process.env.XBOX_CLIENT_SECRET!,
+      },
+    }),
+  ],
+});
+```
+
+## Sign in
+
+```ts
+await authClient.signIn.social({ provider: "xbox", callbackURL: "/dashboard" });
+```
+
+To link Xbox to a signed-in user, see
+[Link an account](/docs/authentication#link-an-account).
+
+## Provider notes
+
+At sign-in, the plugin asks for `xboxlive.signin` (and
+`xboxlive.offline_access` with `offlineAccess: true`), exchanges the
+Microsoft token for an Xbox user token and then an XSTS token, and reads
+the player from its claims: the XUID (`xid`, the account id) and the
+gamertag (`gtg`, the name).
+
+- `relyingParty` (default `http://xboxlive.com`) and `sandboxId` (default
+  `RETAIL`) choose the XSTS token. Xbox partners with a relying party of
+  their own can use it.
+- A Microsoft account without an Xbox profile can't sign in: XSTS refuses
+  it, and the reason (an `XErr` code, without the response) is logged.
+- The Xbox tokens aren't stored; the account keeps the Microsoft tokens,
+  like any provider.
+- Xbox shares no email: players get `<XUID>@xbox.invalid`, see
+  [Placeholder emails](/docs/authentication#placeholder-emails).
+
+## Options
+
+`xbox` takes these, plus the
+[options every provider accepts](/docs/authentication#provider-options):
+
+<TypeTable
+  type={{
+    clientId: { type: "string", description: "Application (client) id from Microsoft Entra ID.", required: true },
+    clientSecret: { type: "string", description: "Client secret.", required: true },
+    offlineAccess: {
+      type: "boolean",
+      default: "false",
+      description: "Also request `xboxlive.offline_access`, for a refresh token.",
+    },
+    relyingParty: {
+      type: "string",
+      default: '"http://xboxlive.com"',
+      description: "The XSTS relying party.",
+    },
+    sandboxId: { type: "string", default: '"RETAIL"', description: "The XSTS sandbox." },
+    redirectURI: { type: "string", description: "Override the redirect URL sent to Microsoft." },
+    prompt: { type: "string", description: "Passed to Microsoft's authorize page." },
+  }}
+/>

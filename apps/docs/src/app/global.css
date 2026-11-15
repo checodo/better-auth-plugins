@@ -1,0 +1,110 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+/* Fonts: Geist Sans / Geist Mono, loaded in layout.tsx via the `geist` package. */
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/*
+ * Brand: lime is the accent, for decoration only (link underlines in dark
+ * mode, hover highlights, selection, home page bullets). It has too little
+ * contrast on light backgrounds for text, so it is never used for words
+ * (see the Brand page). The sidebar and focus rings keep Fumadocs' styles.
+ */
+@theme {
+  --color-brand: #a5f000;
+  --color-brand-ink: #171719;
+}
+
+/*
+ * Colors: a quiet grayscale palette on top of Fumadocs' neutral preset,
+ * close to better-auth's own docs so the plugin docs feel familiar.
+ */
+:root {
+  --color-fd-background: #fafafa;
+  --color-fd-foreground: #0a0a0a;
+  --color-fd-card: #fefefe;
+  --color-fd-card-foreground: #0a0a0a;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #272727;
+  --color-fd-primary: #171717;
+  --color-fd-primary-foreground: #fafafa;
+  --color-fd-secondary: #f5f5f5;
+  --color-fd-secondary-foreground: #171717;
+  --color-fd-muted: #f5f5f5;
+  --color-fd-muted-foreground: #737373;
+  --color-fd-accent: #f0f0f0;
+  --color-fd-accent-foreground: #171717;
+  --color-fd-border: #99999933;
+  --color-fd-ring: #a3a3a3;
+  --link-underline: #171719;
+}
+
+.dark {
+  --color-fd-background: #050505;
+  --color-fd-foreground: #fafafa;
+  --color-fd-card: #0a0a0a;
+  --color-fd-card-foreground: #fafafa;
+  --color-fd-popover: #0a0a0a;
+  --color-fd-popover-foreground: #fafafa;
+  --color-fd-primary: #fafafa;
+  --color-fd-primary-foreground: #171717;
+  --color-fd-secondary: #212121;
+  --color-fd-secondary-foreground: #fafafa;
+  --color-fd-muted: #141414;
+  --color-fd-muted-foreground: #999999;
+  --color-fd-accent: #262626;
+  --color-fd-accent-foreground: #ffffff;
+  --color-fd-border: #80808033;
+  --color-fd-ring: #595959;
+  --link-underline: #a5f000;
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Links in docs content: ink text with a visible underline; lime highlight on hover. */
+.prose a:not([data-card]):not(.not-prose *) {
+  text-decoration-color: var(--link-underline);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  border-radius: 2px;
+  transition: background-color 120ms;
+}
+.prose a:not([data-card]):not(.not-prose *):hover {
+  background-color: color-mix(in srgb, var(--color-brand) 35%, transparent);
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-brand) 55%, transparent);
+  color: var(--color-brand-ink);
+}
+
+/*
+ * Sidebar focus ring: lime, drawn inside the item so the collapsible panel
+ * (overflow: hidden) can't clip it, and starting after the tree line on
+ * nested items.
+ */
+#nd-sidebar a:focus-visible {
+  outline: none;
+}
+#nd-sidebar a:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--color-brand);
+  border-radius: inherit;
+  pointer-events: none;
+}
+#nd-sidebar [style*="--collapsible-panel-height"] > a:focus-visible::after {
+  inset-inline-start: 1rem;
+}
