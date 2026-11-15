@@ -42,4 +42,4 @@ export const authClient = createAuthClient({ plugins: [authenticationClient()] }
 ## Documentation
 
 Every option, endpoint, error code, and table:
-[docs](https://github.com/checodo/better-auth-plugins/blob/main/apps/docs/content/docs/authentication/index.mdx).
+[docs](https://checodo-better-auth-plugins.vercel.app/docs/authentication).

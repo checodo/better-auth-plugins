@@ -9,7 +9,7 @@
     "email": "the.checodo@gmail.com",
     "url": "https://checodo.dev"
   },
-  "homepage": "https://github.com/checodo/better-auth-plugins/tree/main/packages/blocklist",
+  "homepage": "https://checodo-better-auth-plugins.vercel.app/docs/blocklist",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/checodo/better-auth-plugins.git",

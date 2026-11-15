@@ -50,4 +50,4 @@ npx auth@latest migrate
 ## Documentation
 
 Every option, endpoint, error code, and table:
-[docs](https://github.com/checodo/better-auth-plugins/blob/main/apps/docs/content/docs/blocklist.mdx).
+[docs](https://checodo-better-auth-plugins.vercel.app/docs/blocklist).
