@@ -28,7 +28,7 @@ type Body = Record<string, unknown>;
  * after a new organization, so `/organization/create` also checks the name
  * against the team rules (see `createsDefaultTeam`).
  */
-type Check = [BlocklistTarget, (body: Body) => unknown];
+type Check = [Exclude<BlocklistTarget, "password" | "ip">, (body: Body) => unknown];
 
 const CHECKS: Record<string, { checks: Check[]; notify: boolean }> = {
   "/change-email": { checks: [["email", (body) => body.newEmail]], notify: true },

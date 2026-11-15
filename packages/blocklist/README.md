@@ -1,6 +1,6 @@
 # @checodo/better-auth-blocklist
 
-Block disallowed emails, usernames, and organization and team names in [better-auth](https://better-auth.com): disposable email domains, reserved usernames, your own rules, and rules admins manage at runtime.
+Block disallowed emails, usernames, organization and team names, passwords, and IP addresses in [better-auth](https://better-auth.com): disposable email domains, reserved usernames, passwords that contain the user's email or username, IP ranges and countries, your own rules, and rules admins manage at runtime.
 
 A community plugin, not made by the better-auth team. It looks and works
 like better-auth's own plugins: a server plugin, a typed client plugin,

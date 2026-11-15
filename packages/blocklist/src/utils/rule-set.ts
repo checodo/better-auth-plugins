@@ -3,14 +3,15 @@ import { matchesRule } from "./matchers";
 import { getEmailDomain } from "./normalize";
 
 /**
- * Compiled rules indexed for matching. `exact` and `domain` rules are
- * looked up in maps, so large lists (such as the 10,000+ disposable email
- * domains) cost a few lookups per check instead of a scan. Other rule
- * types are checked one by one.
+ * Compiled rules indexed for matching. `exact`, `domain`, and `country`
+ * rules are looked up in maps, so large lists (such as the 10,000+
+ * disposable email domains) cost a few lookups per check instead of a
+ * scan. Other rule types are checked one by one.
  */
 export class RuleSet {
   readonly #exact = new Map<string, CompiledRule>();
   readonly #domains = new Map<string, CompiledRule>();
+  readonly #countries = new Map<string, CompiledRule>();
   readonly #others: CompiledRule[] = [];
 
   constructor(rules: Iterable<CompiledRule> = []) {
@@ -23,7 +24,9 @@ export class RuleSet {
         ? this.#exact
         : compiled.rule.type === "domain"
           ? this.#domains
-          : undefined;
+          : compiled.rule.type === "country"
+            ? this.#countries
+            : undefined;
     if (!map) {
       this.#others.push(compiled);
     } else if (!map.has(compiled.value)) {
@@ -32,12 +35,16 @@ export class RuleSet {
   }
 
   get size(): number {
-    return this.#exact.size + this.#domains.size + this.#others.length;
+    return this.#exact.size + this.#domains.size + this.#countries.size + this.#others.length;
   }
 
-  /** Returns the first rule matching the already-normalized `value`, or `null`. */
-  match(value: string): CompiledRule | null {
-    const exact = this.#exact.get(value);
+  /**
+   * Returns the first rule matching the already-normalized `value`, or
+   * `null`. `folded` is the value with leetspeak folded, for passwords:
+   * every rule but `regex` is compared with it.
+   */
+  match(value: string, folded: string = value): CompiledRule | null {
+    const exact = this.#exact.get(folded);
     if (exact) return exact;
 
     if (this.#domains.size > 0) {
@@ -51,6 +58,14 @@ export class RuleSet {
       }
     }
 
-    return this.#others.find((rule) => matchesRule(value, rule)) ?? null;
+    return (
+      this.#others.find((rule) => matchesRule(rule.rule.type === "regex" ? value : folded, rule)) ??
+      null
+    );
+  }
+
+  /** Returns the `country` rule for a normalized country code, or `null`. */
+  matchCountry(code: string): CompiledRule | null {
+    return this.#countries.get(code) ?? null;
   }
 }

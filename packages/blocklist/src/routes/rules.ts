@@ -13,7 +13,12 @@ import {
   listStoredRules,
 } from "../store";
 import type { ResolvedBlocklistOptions } from "../types";
-import { compileRule, hasUppercaseLiteral, isSafeRegexSource } from "../utils/matchers";
+import {
+  hasUppercaseLiteral,
+  isSafeRegexSource,
+  normalizeRuleValue,
+  RULE_TYPES_BY_TARGET,
+} from "../utils/matchers";
 
 /**
  * Longest stored rule value. The unique index on (target, type, value)
@@ -23,10 +28,10 @@ import { compileRule, hasUppercaseLiteral, isSafeRegexSource } from "../utils/ma
 export const MAX_RULE_VALUE_LENGTH = 255;
 
 const targetSchema = z
-  .enum(["email", "username", "organization", "team"])
+  .enum(["email", "username", "organization", "team", "password", "ip"])
   .meta({ description: "The kind of value the rule applies to" });
 const matchTypeSchema = z
-  .enum(["exact", "domain", "prefix", "suffix", "contains", "regex"])
+  .enum(["exact", "domain", "prefix", "suffix", "contains", "regex", "cidr", "country"])
   .meta({ description: "How the rule value is matched. Defaults to `exact`" });
 
 export function createRuleEndpoints(options: ResolvedBlocklistOptions) {
@@ -85,18 +90,34 @@ export function createRuleEndpoints(options: ResolvedBlocklistOptions) {
         if (type === "domain" && target !== "email") {
           throw APIError.from("BAD_REQUEST", BLOCKLIST_ERROR_CODES.DOMAIN_RULE_ONLY_FOR_EMAIL);
         }
+        if (!RULE_TYPES_BY_TARGET[target].includes(type)) {
+          throw APIError.from(
+            "BAD_REQUEST",
+            BLOCKLIST_ERROR_CODES.RULE_TYPE_NOT_SUPPORTED_FOR_TARGET,
+          );
+        }
         if (type === "regex" && !isSafeRegexSource(value)) {
           throw APIError.from("BAD_REQUEST", BLOCKLIST_ERROR_CODES.INVALID_REGEX_RULE);
         }
         if (type === "regex" && hasUppercaseLiteral(value)) {
           throw APIError.from("BAD_REQUEST", BLOCKLIST_ERROR_CODES.REGEX_RULE_MUST_BE_LOWERCASE);
         }
+        if (type === "country" && !options.ip.getCountry) {
+          throw APIError.from(
+            "BAD_REQUEST",
+            BLOCKLIST_ERROR_CODES.COUNTRY_RULES_REQUIRE_GET_COUNTRY,
+          );
+        }
 
         // Store the value the way it is matched (lowercase, normalized, a
-        // domain without a leading "@"), so equivalent rules are duplicates.
-        // Regular expressions are stored as written.
-        const compiled = compileRule(target, { type, value }, normalizeSettings(options));
-        const stored = { target, type, value: compiled?.value ?? value };
+        // domain without a leading "@", an IP address or range in canonical
+        // form), so equivalent rules are duplicates. Regular expressions are
+        // stored as written.
+        const normalized = normalizeRuleValue(target, { type, value }, normalizeSettings(options));
+        if (normalized === null) {
+          throw APIError.from("BAD_REQUEST", BLOCKLIST_ERROR_CODES.INVALID_IP_RULE);
+        }
+        const stored = { target, type, value: normalized };
         if (stored.value.length > MAX_RULE_VALUE_LENGTH) {
           throw APIError.from("BAD_REQUEST", BLOCKLIST_ERROR_CODES.RULE_VALUE_TOO_LONG);
         }

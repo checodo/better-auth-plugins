@@ -1,7 +1,7 @@
 {
   "name": "@checodo/better-auth-blocklist",
   "version": "0.2.1",
-  "description": "Block disallowed emails, usernames, and organization/team names in better-auth.",
+  "description": "Block disallowed emails, usernames, organization/team names, passwords, and IP addresses in better-auth.",
   "type": "module",
   "license": "MIT",
   "author": {

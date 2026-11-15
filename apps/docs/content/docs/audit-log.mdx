@@ -249,7 +249,7 @@ don't depend on it.
 
 | Type                     | Plugin                         | Recorded when                                          | Severity |
 | ------------------------ | ------------------------------ | ------------------------------------------------------ | -------- |
-| `blocklist.blocked`      | [Blocklist](/docs/blocklist)   | A sign-up or change is refused (`status: "failure"`). `metadata`: `target`, the `value`, and the `rule` | medium |
+| `blocklist.blocked`      | [Blocklist](/docs/blocklist)   | A sign-up, sign-in, or change is refused (`status: "failure"`). `metadata`: `target`, the `value` (`"[redacted]"` for passwords), and the `rule` | medium |
 | `blocklist.rule-created` | Blocklist                      | An admin creates a rule                                | high     |
 | `blocklist.rule-deleted` | Blocklist                      | An admin deletes a rule                                | high     |
 | `referral.created`       | [Referral](/docs/referral)     | A user signs up with a referral code (`userId`: the new user) | low |

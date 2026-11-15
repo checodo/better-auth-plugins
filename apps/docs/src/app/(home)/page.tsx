@@ -37,7 +37,7 @@ const plugins: Plugin[] = [
   {
     name: "Blocklist",
     description:
-      "Block disposable email domains, reserved usernames, and unwanted organization and team names.",
+      "Block disposable email domains, reserved usernames, unwanted names, weak passwords, and IP addresses.",
     highlights: [
       "Checks every sign-up and update: email, OAuth, magic link, admin actions",
       "Catches ADMIN, ádmin, and look-alike letters",

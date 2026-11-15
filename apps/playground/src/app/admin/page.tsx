@@ -8,8 +8,17 @@ import { Button, Card, Code, Hint, Input, ResultMessage, Select, toResult } from
 import { authClient } from "@/lib/auth-client";
 import { makeMeAdmin } from "./actions";
 
-const TARGETS = ["email", "username", "organization", "team"] as const;
-const TYPES = ["exact", "domain", "prefix", "suffix", "contains", "regex"] as const;
+const TARGETS = ["email", "username", "organization", "team", "password", "ip"] as const;
+const TYPES = [
+  "exact",
+  "domain",
+  "prefix",
+  "suffix",
+  "contains",
+  "regex",
+  "cidr",
+  "country",
+] as const;
 
 type Rule = {
   id: string;

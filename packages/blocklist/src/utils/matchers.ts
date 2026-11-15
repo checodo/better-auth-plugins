@@ -1,5 +1,8 @@
-import type { BlocklistRule, BlocklistTarget, CompiledRule } from "../types";
+import type { BlocklistMatchType, BlocklistRule, BlocklistTarget, CompiledRule } from "../types";
+import type { IpNetwork } from "./ip";
+import { canonicalCidr, canonicalIp, isInNetwork, parseCidr, parseIp } from "./ip";
 import { normalizeDomain, normalizeEmail, normalizeValue } from "./normalize";
+import { foldLeetspeak } from "./password";
 
 /** Hard cap on regex rule length, to keep the risk of slow patterns bounded. */
 export const MAX_REGEX_LENGTH = 200;
@@ -156,46 +159,105 @@ export interface NormalizeSettings {
   stripPlusAddressing: boolean;
 }
 
-/** Prepares a checked value of `target` for matching. */
+const TEXT_RULE_TYPES = ["exact", "prefix", "suffix", "contains", "regex"] as const;
+
+/** The rule types each target accepts. */
+export const RULE_TYPES_BY_TARGET: Record<BlocklistTarget, readonly BlocklistMatchType[]> = {
+  email: [...TEXT_RULE_TYPES, "domain"],
+  username: TEXT_RULE_TYPES,
+  organization: TEXT_RULE_TYPES,
+  team: TEXT_RULE_TYPES,
+  password: TEXT_RULE_TYPES,
+  ip: ["exact", "cidr", "country"],
+};
+
+/** A country code as proxies send it: two letters, or a letter and a digit (Cloudflare's `T1` for Tor). */
+const COUNTRY_CODE = /^[a-z][a-z0-9]$/;
+
+/** Normalizes a country code for comparison, or returns `null` if it isn't one. */
+export function normalizeCountry(value: string): string | null {
+  const code = value.trim().toLowerCase();
+  return COUNTRY_CODE.test(code) ? code : null;
+}
+
+/**
+ * Prepares a checked value of `target` for matching. IP addresses get
+ * their canonical form (an invalid address is only trimmed and
+ * lowercased, so it matches no IP rule).
+ */
 export function normalizeTargetValue(
   target: BlocklistTarget,
   value: string,
   settings: NormalizeSettings,
 ): string {
-  return target === "email"
-    ? normalizeEmail(value, settings)
-    : normalizeValue(value, settings.full);
+  if (target === "email") return normalizeEmail(value, settings);
+  if (target === "ip") return canonicalIp(value) ?? value.trim().toLowerCase();
+  return normalizeValue(value, settings.full);
 }
 
 /**
- * Prepares a rule for matching: normalizes its value the same way checked
- * values are normalized, or compiles its regular expression. Returns `null`
- * for rules that can never match (an unsafe regex, or a `domain` rule
- * outside the `email` target).
+ * The value a rule is stored and compared with: normalized the way checked
+ * values are, a domain without a leading `@`, an IP address or range in
+ * canonical form, a lowercase country code. Regular expressions are kept
+ * as written. Returns `null` for rules that can never match: a rule type
+ * the target doesn't take, an unsafe regex, or an invalid IP, range, or
+ * country code.
+ */
+export function normalizeRuleValue(
+  target: BlocklistTarget,
+  rule: Pick<BlocklistRule, "type" | "value">,
+  settings: NormalizeSettings,
+): string | null {
+  if (!RULE_TYPES_BY_TARGET[target].includes(rule.type)) return null;
+  switch (rule.type) {
+    case "regex":
+      return isSafeRegexSource(rule.value) ? rule.value : null;
+    case "domain":
+      return normalizeDomain(rule.value, settings.full);
+    case "cidr":
+      return canonicalCidr(rule.value);
+    case "country":
+      return normalizeCountry(rule.value);
+    case "exact":
+      return target === "ip"
+        ? canonicalIp(rule.value)
+        : normalizeTargetValue(target, rule.value, settings);
+    default:
+      return normalizeValue(rule.value, settings.full);
+  }
+}
+
+/**
+ * Prepares a rule for matching (see `normalizeRuleValue`): compiles its
+ * regular expression, parses its IP range, and for passwords folds
+ * leetspeak, so `p@ssw0rd` and `password` are the same rule. Returns
+ * `null` for rules that can never match.
  */
 export function compileRule(
   target: BlocklistTarget,
   rule: BlocklistRule,
   settings: NormalizeSettings,
 ): CompiledRule | null {
+  const value = normalizeRuleValue(target, rule, settings);
+  if (value === null) return null;
   switch (rule.type) {
     case "regex":
-      if (!isSafeRegexSource(rule.value)) return null;
-      return { rule, value: rule.value, regex: new RegExp(rule.value, "u") };
+      return { rule, value, regex: new RegExp(value, "u") };
+    case "cidr":
+      return { rule, value, network: parseCidr(value) ?? undefined };
     case "domain":
-      if (target !== "email") return null;
-      return { rule, value: normalizeDomain(rule.value, settings.full) };
-    case "exact":
-      return { rule, value: normalizeTargetValue(target, rule.value, settings) };
+    case "country":
+      return { rule, value };
     default:
-      return { rule, value: normalizeValue(rule.value, settings.full) };
+      return { rule, value: target === "password" ? foldLeetspeak(value) : value };
   }
 }
 
 /**
  * Returns `true` if the already-normalized `value` matches a `prefix`,
- * `suffix`, `contains`, or `regex` rule. `exact` and `domain` rules are
- * matched by `RuleSet` through its lookup maps, never here.
+ * `suffix`, `contains`, `regex`, or `cidr` rule. `exact`, `domain`, and
+ * `country` rules are matched by `RuleSet` through its lookup maps, never
+ * here.
  */
 export function matchesRule(value: string, compiled: CompiledRule): boolean {
   switch (compiled.rule.type) {
@@ -209,6 +271,10 @@ export function matchesRule(value: string, compiled: CompiledRule): boolean {
       // Fail closed: too long to run the pattern on safely.
       if (value.length > MAX_REGEX_INPUT_LENGTH) return true;
       return compiled.regex?.test(value) ?? false;
+    case "cidr": {
+      const bytes = compiled.network && parseIp(value);
+      return !!bytes && isInNetwork(bytes, compiled.network as IpNetwork);
+    }
     default:
       return false;
   }

@@ -65,7 +65,7 @@ stores about people, and what happens to it when a user is deleted.
 | Table           | Personal data                                                                     | When the user is deleted                                   |
 | --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `auditEvent`    | User ids, IP address, user agent; in `metadata`, emails and identifiers of failed sign-ins | Kept, with a `user-deleted` event. Removed by `retention` |
-| `blocklistRule` | Whatever admins block, which can be an email address                              | Not linked to users                                        |
+| `blocklistRule` | Whatever admins block, which can be an email or IP address                        | Not linked to users                                        |
 | `referralCode`  | The owner's user id                                                               | Deleted with the user                                      |
 | `referral`      | The referrer's and the referred user's ids                                        | Deleted with either user                                   |
 | `referralStep`  | Step `metadata` your server passes                                                | Deleted with its referral                                  |
