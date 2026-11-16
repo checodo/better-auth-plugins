@@ -197,16 +197,19 @@ token.
 
 <Callout title="Passwords are never passed on">
   `onBlocked` and the [audit log](/docs/audit-log) get `"[redacted]"` as
-  the value, never the password. For the context check, the rule's value
-  says where the word came from: `"[email]"`, `"[username]"`, or
-  `"[appName]"`.
+  the value, never the password, and as the value of the rule that
+  matched: an `exact` rule is the password itself, a `contains` rule part
+  of it. The rule's `type` and `reason` are kept. For the context check,
+  the rule's value says where the word came from: `"[email]"`,
+  `"[username]"`, or `"[appName]"`.
 </Callout>
 
 <Callout title="With haveIBeenPwned">
   The rules complement better-auth's
   [`haveIBeenPwned`](https://better-auth.com/docs/plugins/have-i-been-pwned)
   plugin, which rejects passwords found in data breaches. Both check the
-  same endpoints and can be used together.
+  same endpoints (the blocklist also checks `/set-password`) and can be
+  used together.
 </Callout>
 
 ### IP addresses and countries
@@ -249,7 +252,10 @@ blocklist({
   request, usually from a header your host or proxy sets:
   `cf-ipcountry` on Cloudflare (which also sends `T1` for Tor),
   `x-vercel-ip-country` on Vercel, or `request.cf.country` in a Cloudflare
-  Worker. There is no built-in geo-IP database.
+  Worker. There is no built-in geo-IP database. If `getCountry` throws,
+  the error is logged and the country counts as unknown, like a request
+  without the header: the request isn't failed, and address rules still
+  apply.
 
 <Callout type="warn" title="Only trust headers your proxy sets">
   Clients can send `cf-ipcountry` or `x-forwarded-for` themselves. Read a
@@ -621,7 +627,7 @@ if (error?.code === BLOCKLIST_ERROR_CODES.EMAIL_NOT_ALLOWED.code) {
     onBlocked: {
       type: "({ target, value, rule }) => void | Promise<void>",
       description:
-        'Called whenever a value is blocked, before the request fails. Useful for logging or auditing. `value` is `"[redacted]"` for passwords, and the IP address or country code for `ip`. Errors thrown here are logged and don\'t change the response.',
+        'Called whenever a value is blocked, before the request fails. Useful for logging or auditing. `value` and `rule.value` are `"[redacted]"` for passwords (except the context check\'s `"[email]"`, `"[username]"`, `"[appName]"`), and `value` is the IP address or country code for `ip`. Errors thrown here are logged and don\'t change the response.',
     },
   }}
 />
@@ -702,7 +708,7 @@ In addition to the target options (`values` take `exact` addresses and
     getCountry: {
       type: "({ request, headers }) => string | null | undefined | Promise<...>",
       description:
-        "Returns the country code of a request, usually from a header your host or proxy sets. Required for country rules.",
+        "Returns the country code of a request, usually from a header your host or proxy sets. Required for country rules. Errors thrown here are logged, and the country counts as unknown.",
     },
     scope: {
       type: '("sign-up" | "sign-in")[]',

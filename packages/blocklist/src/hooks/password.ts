@@ -6,9 +6,9 @@ import type { ContextSource } from "../utils/password";
 import { emailLocalPart } from "../utils/password";
 
 /**
- * Endpoints that set a new password, the same as the official
- * `haveIBeenPwned` plugin's defaults. The password is checked when the
- * endpoint hashes it, so after better-auth has checked its length and
+ * Endpoints that set a new password: the official `haveIBeenPwned`
+ * plugin's defaults, plus `/set-password`. The password is checked when
+ * the endpoint hashes it, so after better-auth has checked its length and
  * verified the reset token or OTP: nobody can probe the rules without one.
  */
 export const PASSWORD_PATHS = new Set([
@@ -22,17 +22,40 @@ export const PASSWORD_PATHS = new Set([
   "/admin/set-user-password",
 ]);
 
+/**
+ * Server-only endpoints have no path of their own (better-auth runs them
+ * as `virtual:`), so they are recognized by their operation id, the name
+ * they have on `auth.api`.
+ */
+const SERVER_ONLY_PASSWORD_ENDPOINTS: Readonly<Record<string, string>> = {
+  setPassword: "/set-password",
+};
+
 type Endpoint = NonNullable<ReturnType<typeof tryGetCurrentAuthEndpointContext>>;
+
+/** The `PASSWORD_PATHS` entry of the running endpoint, or `null` if it doesn't set a password. */
+function passwordPath(endpoint: Endpoint | null | undefined): string | null {
+  if (!endpoint) return null;
+  if (endpoint.path && PASSWORD_PATHS.has(endpoint.path)) return endpoint.path;
+  const { operationId } = endpoint as { operationId?: unknown };
+  if (
+    typeof operationId !== "string" ||
+    !Object.hasOwn(SERVER_ONLY_PASSWORD_ENDPOINTS, operationId)
+  ) {
+    return null;
+  }
+  return SERVER_ONLY_PASSWORD_ENDPOINTS[operationId] ?? null;
+}
 type Body = Record<string, unknown>;
 type UserLike = { email?: unknown; username?: unknown } | null | undefined;
 
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 /** Finds the user whose password an endpoint sets, for the context words. */
-async function findUser(endpoint: Endpoint, body: Body): Promise<UserLike> {
+async function findUser(endpoint: Endpoint, path: string, body: Body): Promise<UserLike> {
   const auth = endpoint.context;
   const session = (auth as { session?: { user?: UserLike } | null }).session;
-  switch (endpoint.path) {
+  switch (path) {
     case "/change-password":
     case "/set-password":
       return session?.user;
@@ -86,9 +109,10 @@ export function wrapPasswordHasher(
     ...original,
     async hash(password) {
       const endpoint = tryGetCurrentAuthEndpointContext();
-      if (endpoint?.path && PASSWORD_PATHS.has(endpoint.path)) {
+      const path = passwordPath(endpoint);
+      if (endpoint && path) {
         const body = (endpoint.body ?? {}) as Body;
-        const user = options.password.checkContext ? await findUser(endpoint, body) : null;
+        const user = options.password.checkContext ? await findUser(endpoint, path, body) : null;
         const context: Partial<Record<ContextSource, string | undefined>> = {
           email: emailLocalPart(user?.email),
           username: text(user?.username),

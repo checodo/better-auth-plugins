@@ -33,6 +33,25 @@ function withFullIpv6(options: BetterAuthOptions): BetterAuthOptions {
 const isAdminPath = (path: string | undefined) => !!path?.startsWith("/admin/");
 
 /**
+ * The request's country from `getCountry`, or `null` without one. An
+ * error thrown by `getCountry` is logged and counts as an unknown country,
+ * like a request without the country header: the IP rules still apply.
+ */
+async function readCountry(
+  ctx: RequestContext,
+  options: ResolvedBlocklistOptions,
+  headers: Headers,
+): Promise<string | null | undefined> {
+  if (!options.ip.getCountry) return null;
+  try {
+    return await options.ip.getCountry({ request: ctx.request, headers });
+  } catch (error) {
+    ctx.context.logger.error("[blocklist] getCountry threw an error", error);
+    return null;
+  }
+}
+
+/**
  * Throws if the request's IP address or country is blocked for `scope`.
  * Does nothing without a request (server code calling the adapter
  * directly), outside the configured scopes, and on admin endpoints.
@@ -47,9 +66,7 @@ export async function checkClientIp(
   if (!headers) return;
 
   const ip = getIP(ctx.request ?? headers, withFullIpv6(ctx.context.options));
-  const country = options.ip.getCountry
-    ? await options.ip.getCountry({ request: ctx.request, headers })
-    : null;
+  const country = await readCountry(ctx, options, headers);
   await assertIpAllowed(ctx.context.adapter, options, { ip, country }, ctx.context.logger);
 }
 

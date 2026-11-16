@@ -28,14 +28,20 @@ function parseIpv4(value: string): Uint8Array | null {
   return bytes;
 }
 
-function parseGroups(side: string): number[] | null {
+/**
+ * Parses the groups on one side of `::`. `ipv4Tail`: whether the side may
+ * end in an embedded IPv4 address, which must end the whole address, so
+ * only the right side of `::` (or an address without one) may.
+ */
+function parseGroups(side: string, ipv4Tail: boolean): number[] | null {
   if (side === "") return [];
   const groups: number[] = [];
   const parts = side.split(":");
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i] as string;
     // An embedded IPv4 address may end the address: ::ffff:192.0.2.1
-    if (i === parts.length - 1 && part.includes(".")) {
+    if (part.includes(".")) {
+      if (!ipv4Tail || i !== parts.length - 1) return null;
       const ipv4 = parseIpv4(part);
       if (!ipv4) return null;
       groups.push(((ipv4[0] as number) << 8) | (ipv4[1] as number));
@@ -51,12 +57,13 @@ function parseGroups(side: string): number[] | null {
 function parseIpv6(value: string): Uint8Array | null {
   const halves = value.split("::");
   if (halves.length > 2) return null;
-  const left = parseGroups(halves[0] as string);
-  const right = halves.length === 2 ? parseGroups(halves[1] as string) : [];
+  const compressed = halves.length === 2;
+  const left = parseGroups(halves[0] as string, !compressed);
+  const right = compressed ? parseGroups(halves[1] as string, true) : [];
   if (!left || !right) return null;
 
   let groups: number[];
-  if (halves.length === 2) {
+  if (compressed) {
     const missing = 8 - left.length - right.length;
     if (missing < 1) return null;
     groups = [...left, ...new Array<number>(missing).fill(0), ...right];

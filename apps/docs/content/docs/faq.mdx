@@ -12,8 +12,15 @@ Report problems in this project's repository, not to better-auth.
 ## Which better-auth versions are supported?
 
 `better-auth` and `@better-auth/core` 1.7.20 or a later 1.x release. The
-packages declare this range as peer dependencies, and it is the version
-the tests run against.
+packages declare this range as peer dependencies; the tests run against
+the newest release in it.
+
+## Which runtimes are supported?
+
+Every runtime better-auth supports: Node.js, Bun, Deno, and edge
+runtimes. The plugins only use Web APIs (Web Crypto, `fetch`) and no
+`node:` modules. The Node 24 requirement in the repository is for
+developing the plugins, not for using them.
 
 ## Can I use them with CommonJS?
 

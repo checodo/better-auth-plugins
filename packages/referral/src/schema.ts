@@ -57,6 +57,26 @@ export const referralSchema = {
         type: "date",
         required: true,
       },
+      /**
+       * Delivery of `onReferralCompleted`: "pending" until it returns
+       * without an error, then "rewarded". Empty for referrals completed
+       * without `onReferralCompleted` set, which are never retried.
+       */
+      rewardStatus: {
+        type: "string",
+        required: false,
+        index: true,
+      },
+      /** How often `onReferralCompleted` was called for the referral. */
+      rewardAttempts: {
+        type: "number",
+        required: false,
+      },
+      /** When the last call of `onReferralCompleted` started. */
+      rewardAttemptAt: {
+        type: "date",
+        required: false,
+      },
     },
     indexes: [{ fields: ["referredUserId"], unique: true }],
   },
@@ -83,6 +103,40 @@ export const referralSchema = {
       },
     },
     indexes: [{ fields: ["referralId", "step"], unique: true }],
+  },
+  /**
+   * The places of `maxReferralsPerUser`: a referral is kept only once it
+   * holds one. `key` (`<referrerUserId>:<n>`, `n` below the limit) is
+   * unique, so concurrent sign-ups can't take the same place, whichever
+   * order their transactions commit in. Only used with
+   * `maxReferralsPerUser`.
+   */
+  referralSlot: {
+    fields: {
+      referrerUserId: {
+        type: "string",
+        required: true,
+        index: true,
+        references: { model: "user", field: "id", onDelete: "cascade" },
+      },
+      referralId: {
+        type: "string",
+        required: true,
+        references: { model: "referral", field: "id", onDelete: "cascade" },
+      },
+      key: {
+        type: "string",
+        required: true,
+      },
+      createdAt: {
+        type: "date",
+        required: true,
+      },
+    },
+    indexes: [
+      { fields: ["key"], unique: true },
+      { fields: ["referralId"], unique: true },
+    ],
   },
 } satisfies BetterAuthPluginDBSchema;
 

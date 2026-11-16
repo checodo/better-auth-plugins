@@ -3,13 +3,14 @@ import { getCurrentAdapter, queueAfterTransactionHook } from "@better-auth/core/
 import { APIError, getOAuthState } from "better-auth/api";
 import { REFERRAL_ERROR_CODES } from "../error-codes";
 import { EMAIL_VERIFIED_STEP } from "../options";
-import { findUsableCode, getOrCreateCode, recordStep, referralCreated } from "../referrals";
 import {
-  countReferralsBefore,
-  createReferral,
-  deleteReferral,
-  findReferralByReferredUserId,
-} from "../store";
+  claimReferralPlace,
+  findUsableCode,
+  getOrCreateCode,
+  recordStep,
+  referralCreated,
+} from "../referrals";
+import { createReferral, deleteReferral, findReferralByReferredUserId } from "../store";
 import type { Referral, ResolvedReferralOptions } from "../types";
 
 export const REFERRAL_CODE_HEADER = "x-referral-code";
@@ -90,31 +91,35 @@ export function createDatabaseHooks(
 
     let referral: Referral;
     try {
-      referral = await createReferral(adapter, {
-        referrerUserId: code.userId,
-        referredUserId: user.id,
-        code: code.code,
-        status: options.steps.length === 0 ? "completed" : "pending",
-      });
+      referral = await createReferral(
+        adapter,
+        {
+          referrerUserId: code.userId,
+          referredUserId: user.id,
+          code: code.code,
+          status: options.steps.length === 0 ? "completed" : "pending",
+        },
+        { trackReward: !!options.onReferralCompleted },
+      );
     } catch (error) {
       // Already referred (unique index): keep the first referral.
       if (await findReferralByReferredUserId(adapter, user.id)) return;
       throw error;
     }
 
-    // Settled once the user's transaction (if any) is committed:
-    // concurrent sign-ups in other transactions are visible by then, so
-    // `maxReferralsPerUser` holds, and nothing is announced for a sign-up
-    // that was rolled back.
+    // Settled once the user's transaction (if any) is committed, so
+    // nothing is announced for a sign-up that was rolled back, and a
+    // place of `maxReferralsPerUser` is taken outside it: a conflict on
+    // the place's unique key can't abort the sign-up.
     const settle = async () => {
       try {
         const max = options.maxReferralsPerUser;
-        if (max !== undefined && (await countReferralsBefore(ctx.adapter, referral)) >= max) {
+        if (max !== undefined && !(await claimReferralPlace(ctx.adapter, max, referral))) {
           // Signed up while the last free places were taken: no referral.
           await deleteReferral(ctx.adapter, referral.id);
           return;
         }
-        await referralCreated(ctx, options, referral);
+        await referralCreated(ctx.adapter, ctx, options, referral);
         if (tracksEmailVerified && user.emailVerified) {
           await recordStep(ctx.adapter, ctx, options, referral, EMAIL_VERIFIED_STEP);
         }

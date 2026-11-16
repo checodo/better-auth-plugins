@@ -47,6 +47,7 @@
     "build": "tsdown",
     "dev": "tsdown --watch --no-clean",
     "test": "vitest run",
+    "test:db": "vitest run test/referral.test.ts -t \"concurrent|race|out of order|at once\"",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo",
@@ -66,6 +67,8 @@
     "@repo/tooling": "workspace:*",
     "@types/node": "catalog:",
     "better-auth": "catalog:",
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1",
     "tsdown": "^0.23.7",
     "typescript": "catalog:",
     "vitest": "catalog:"

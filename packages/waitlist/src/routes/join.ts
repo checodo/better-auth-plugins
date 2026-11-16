@@ -18,7 +18,7 @@ import {
   findEntryByEmail,
   findEntryByInviteCodeHash,
   findEntryByTokenHash,
-  updateEntry,
+  updateEntryIf,
 } from "../store";
 import type { ResolvedWaitlistOptions, WaitlistEntry } from "../types";
 import { normalizeEmail } from "../utils/email";
@@ -128,14 +128,20 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
             Date.now() - lastSent >= CONFIRMATION_RESEND_INTERVAL
           ) {
             // Only the hash of the old token is stored: the new email gets
-            // a new token, and the old link stops working.
+            // a new token, and the old link stops working. The update only
+            // applies while the old token is current, so of concurrent
+            // joins exactly one renews the link and sends the email.
             const token = await newSecret(TOKEN_LENGTH);
-            const changes = { confirmationsSent: sent + 1, tokenHash: token.hash };
-            const renewed = (await updateEntry(adapter, existing.id, changes)) ?? {
-              ...existing,
-              ...changes,
-            };
-            await sendConfirmation(ctx.context, options, renewed, token.value);
+            const renewed = await updateEntryIf(
+              adapter,
+              existing.id,
+              [
+                { field: "status", value: "unconfirmed" },
+                { field: "tokenHash", value: existing.tokenHash },
+              ],
+              { confirmationsSent: sent + 1, tokenHash: token.hash },
+            );
+            if (renewed) await sendConfirmation(ctx.context, options, renewed, token.value);
           }
           return ctx.json({ success: true });
         }
@@ -192,16 +198,29 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
           throw APIError.from("FORBIDDEN", WAITLIST_ERROR_CODES.WAITLIST_FULL);
         }
 
-        const confirmed = (await updateEntry(adapter, entry.id, { status: "pending" })) ?? {
-          ...entry,
-          status: "pending" as const,
-        };
+        // Only applies while the entry is unconfirmed with this token: of
+        // concurrent confirmations, exactly one goes on to `completeJoin`;
+        // the others answer like a repeated confirmation.
+        const sameToken = { field: "tokenHash", value: entry.tokenHash } as const;
+        const confirmed = await updateEntryIf(
+          adapter,
+          entry.id,
+          [{ field: "status", value: "unconfirmed" }, sameToken],
+          { status: "pending" },
+        );
+        if (!confirmed) return ctx.json({ success: true });
         if (await isOverfilled(adapter)) {
-          // Back to unconfirmed, with the link's expiry unchanged.
-          await updateEntry(adapter, entry.id, {
-            status: "unconfirmed",
-            updatedAt: new Date(entry.updatedAt),
-          });
+          // Back to unconfirmed, with the link's expiry unchanged. Only if
+          // nothing else (an admin's approval) changed the entry since.
+          await updateEntryIf(
+            adapter,
+            entry.id,
+            [{ field: "status", value: "pending" }, sameToken],
+            {
+              status: "unconfirmed",
+              updatedAt: new Date(entry.updatedAt),
+            },
+          );
           throw APIError.from("FORBIDDEN", WAITLIST_ERROR_CODES.WAITLIST_FULL);
         }
         await completeJoin(ctx.context, options, confirmed, ctx.body.token);

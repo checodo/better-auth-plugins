@@ -24,6 +24,15 @@ export function resolveOptions(options: ReferralOptions): ResolvedReferralOption
     fail(`"maxReferralsPerUser" must be a positive integer, got ${max}.`);
   }
 
+  const delay = options.rewardRetry?.delay ?? 5 * 60_000;
+  if (!Number.isInteger(delay) || delay < 1000) {
+    fail(`"rewardRetry.delay" must be an integer of at least 1000 (ms), got ${delay}.`);
+  }
+  const maxAttempts = options.rewardRetry?.maxAttempts ?? 10;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    fail(`"rewardRetry.maxAttempts" must be a positive integer, got ${maxAttempts}.`);
+  }
+
   const steps = [...(options.steps ?? [])];
   for (const step of steps) {
     if (!/^[a-z0-9][a-z0-9_-]*$/i.test(step) || step.length > MAX_STEP_LENGTH) {
@@ -49,6 +58,7 @@ export function resolveOptions(options: ReferralOptions): ResolvedReferralOption
     onReferral: options.onReferral,
     onStepCompleted: options.onStepCompleted,
     onReferralCompleted: options.onReferralCompleted,
+    rewardRetry: { delay, maxAttempts },
     maskEmails: options.maskEmails ?? true,
     hideNames: options.hideNames ?? false,
     ...resolveAdminOptions(options),

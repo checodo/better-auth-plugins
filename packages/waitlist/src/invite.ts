@@ -1,7 +1,8 @@
 import type { AuthContext } from "@better-auth/core";
+import type { Where } from "@better-auth/core/db/adapter";
 import { recordAuditEvent } from "@repo/plugin-utils/audit";
 import { runCallback } from "@repo/plugin-utils/callbacks";
-import { updateEntry } from "./store";
+import { updateEntryIf } from "./store";
 import type { ResolvedWaitlistOptions, WaitlistAdminEntry, WaitlistEntry } from "./types";
 import { newSecret } from "./utils/secret";
 
@@ -37,6 +38,11 @@ export function isInviteValid(entry: WaitlistEntry, now = new Date()): boolean {
  * Only its hash is stored, so unless the caller still has it (`token`,
  * right after joining or confirming), the entry gets a new token and
  * links from earlier emails stop working.
+ *
+ * Only applies while the entry is as `entry` describes it (same status,
+ * and for a renewal the same invite), so two concurrent approvals can't
+ * both send an invite of which only the last would work. Returns `null`
+ * when another request changed the entry first; nothing is sent then.
  */
 export async function approveEntry(
   context: Context,
@@ -44,7 +50,7 @@ export async function approveEntry(
   entry: WaitlistEntry,
   approvedBy: string | null,
   token?: string | undefined,
-): Promise<{ entry: WaitlistEntry; inviteCode: string }> {
+): Promise<{ entry: WaitlistEntry; inviteCode: string } | null> {
   const now = new Date();
   const invite = await newSecret(INVITE_CODE_LENGTH);
   const newToken = token === undefined ? await newSecret(TOKEN_LENGTH) : null;
@@ -59,10 +65,12 @@ export async function approveEntry(
     ...(newToken ? { tokenHash: newToken.hash } : {}),
   };
 
-  const updated = (await updateEntry(context.adapter, entry.id, changes)) ?? {
-    ...entry,
-    ...changes,
-  };
+  const expected: Where[] = [{ field: "status", value: entry.status }];
+  if (entry.status === "approved" && entry.inviteCodeHash) {
+    expected.push({ field: "inviteCodeHash", value: entry.inviteCodeHash });
+  }
+  const updated = await updateEntryIf(context.adapter, entry.id, expected, changes);
+  if (!updated) return null;
 
   await recordAuditEvent({
     type: "waitlist.approved",
@@ -99,6 +107,7 @@ export async function completeJoin(
     await runCallback(context, "waitlist", "onJoin", () => onJoin({ ...rest, token }));
   }
   if (await options.autoApprove(entry.email)) {
+    // `null`: an admin approved it in the meantime, and sent the invite.
     await approveEntry(context, options, entry, null, token);
   }
 }

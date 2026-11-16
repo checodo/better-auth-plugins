@@ -52,4 +52,43 @@ describe("runCallback", () => {
     await Promise.all(ctx.pending);
     expect(ctx.logger.error).toHaveBeenCalledOnce();
   });
+
+  it("runs onSuccess only after the callback succeeded", async () => {
+    const ctx = context(false);
+    const onSuccess = vi.fn();
+    await runCallback(ctx as never, "referral", "onReferralCompleted", async () => {}, onSuccess);
+    expect(onSuccess).toHaveBeenCalledOnce();
+
+    const failed = vi.fn();
+    await runCallback(
+      ctx as never,
+      "referral",
+      "onReferralCompleted",
+      () => {
+        throw new Error("boom");
+      },
+      failed,
+    );
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("logs errors of onSuccess and never throws", async () => {
+    const ctx = context(false);
+    const error = new Error("db down");
+    await expect(
+      runCallback(
+        ctx as never,
+        "referral",
+        "onReferralCompleted",
+        async () => {},
+        () => {
+          throw error;
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(ctx.logger.error).toHaveBeenCalledWith(
+      "[referral] failed to record that onReferralCompleted succeeded",
+      error,
+    );
+  });
 });

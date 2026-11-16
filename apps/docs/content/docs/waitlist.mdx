@@ -134,8 +134,12 @@ approved, and `onJoin` and `autoApprove` run after the confirmation.
 - Whoever fills in the join form doesn't have to own the address, so
   resends are limited: at most one every 5 minutes, and 3 in total. An
   address gets at most 4 confirmation emails until its entry expires,
-  however often someone submits it. The answer to the join request is the
-  same whether an email went out or not.
+  however often someone submits it, also when the requests arrive at the
+  same time: the link is renewed in a single conditional write, so only
+  one of them sends an email. The answer to the join request is the same
+  whether an email went out or not.
+- Opening the link several times, also at the same time, confirms the
+  entry once: `onJoin` and `autoApprove` run once.
 - Unconfirmed entries whose link has expired are deleted, so emails nobody
   confirmed aren't kept.
 - An admin can still invite an unconfirmed email directly (see
@@ -410,6 +414,12 @@ const { data: stats } = await authClient.waitlist.getStats();
 - `approveEntries` skips `unconfirmed` entries (they haven't agreed to be
   contacted) and `registered` ones.
 - Rejecting an entry invalidates its invite.
+- **Concurrent changes**: approving, renewing, and rejecting only apply
+  while the entry is as it was read, so two admins approving the same
+  entry at once send one invite, and a rejection never overwrites a
+  sign-up that happened meanwhile. `approveEntries` skips an entry that
+  another request changed first; `rejectEntry` and `createInvite` fail
+  with `409 ENTRY_CHANGED`, to retry after loading the entry again.
 - Entries come back without their `token`: only the person gets it, by
   email.
 - `inviteCode` is the plain code only in the responses of `approveEntries`
@@ -516,6 +526,7 @@ if (error?.code === WAITLIST_ERROR_CODES.EMAIL_NOT_APPROVED.code) {
 | `INVALID_TOKEN`                          | 400    | Confirm, status, or leave with an unknown or expired token               |
 | `WAITLIST_FULL`                          | 403    | Joining or confirming while the waitlist holds `maxEntries`              |
 | `ENTRY_NOT_FOUND`                        | 404    | Rejecting or deleting an entry that doesn't exist                        |
+| `ENTRY_CHANGED`                          | 409    | Rejecting or inviting while another request changes the same entry       |
 | `METADATA_TOO_LARGE`                     | 400    | Joining with more than 2,000 characters of JSON `metadata`               |
 | `YOU_ARE_NOT_ALLOWED_TO_MANAGE_WAITLIST` | 403    | Admin endpoints, for users who aren't admins                             |
 

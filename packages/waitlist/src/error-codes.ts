@@ -7,6 +7,7 @@ export const WAITLIST_ERROR_CODES = defineErrorCodes({
   INVALID_TOKEN: "This link is invalid or has expired",
   WAITLIST_FULL: "The waitlist is full",
   ENTRY_NOT_FOUND: "No waitlist entry was found with this id",
+  ENTRY_CHANGED: "The waitlist entry was changed by another request. Load it again and retry",
   METADATA_TOO_LARGE: "The metadata is too large",
   YOU_ARE_NOT_ALLOWED_TO_MANAGE_WAITLIST: "You are not allowed to manage the waitlist",
 });

@@ -14,7 +14,7 @@ import {
   findEntryByEmail,
   findEntryById,
   listEntries,
-  updateEntry,
+  updateEntryIf,
 } from "../store";
 import type {
   ResolvedWaitlistOptions,
@@ -156,7 +156,9 @@ export function createAdminEndpoints(options: ResolvedWaitlistOptions) {
           // Unconfirmed emails haven't agreed to be contacted yet.
           if (entry.status === "registered" || entry.status === "unconfirmed") continue;
           const approved = await approveEntry(ctx.context, options, entry, admin.id);
-          entries.push(toAdminEntry(approved.entry, approved.inviteCode));
+          // `null`: changed by another request meanwhile (approved by
+          // another admin, signed up, ...); skipped like the cases above.
+          if (approved) entries.push(toAdminEntry(approved.entry, approved.inviteCode));
         }
         return ctx.json({ entries });
       },
@@ -178,12 +180,15 @@ export function createAdminEndpoints(options: ResolvedWaitlistOptions) {
         if (!entry) throw APIError.from("NOT_FOUND", WAITLIST_ERROR_CODES.ENTRY_NOT_FOUND);
         if (entry.status === "registered") return ctx.json({ entry: toAdminEntry(entry) });
 
-        const updated =
-          (await updateEntry(adapter, entry.id, {
-            status: "rejected",
-            inviteCodeHash: null,
-            inviteExpiresAt: null,
-          })) ?? entry;
+        // Only while the entry is as read, so a sign-up or approval that
+        // happened meanwhile isn't overwritten.
+        const updated = await updateEntryIf(
+          adapter,
+          entry.id,
+          [{ field: "status", value: entry.status }],
+          { status: "rejected", inviteCodeHash: null, inviteExpiresAt: null },
+        );
+        if (!updated) throw APIError.from("CONFLICT", WAITLIST_ERROR_CODES.ENTRY_CHANGED);
         await recordAuditEvent({
           type: "waitlist.rejected",
           severity: "medium",
@@ -256,6 +261,7 @@ export function createAdminEndpoints(options: ResolvedWaitlistOptions) {
         }
         if (entry.status === "registered") return ctx.json({ entry: toAdminEntry(entry) });
         const approved = await approveEntry(ctx.context, options, entry, admin.id);
+        if (!approved) throw APIError.from("CONFLICT", WAITLIST_ERROR_CODES.ENTRY_CHANGED);
         return ctx.json({ entry: toAdminEntry(approved.entry, approved.inviteCode) });
       },
     ),

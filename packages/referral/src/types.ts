@@ -29,6 +29,30 @@ export interface Referral {
   status: ReferralStatus;
   completedAt?: Date | null | undefined;
   createdAt: Date;
+  /**
+   * Delivery of `onReferralCompleted`: `"pending"` until it returns without
+   * an error, then `"rewarded"`. `null` when the referral completed without
+   * `onReferralCompleted` set (or before this was tracked).
+   */
+  rewardStatus?: RewardStatus | null | undefined;
+  /** How often `onReferralCompleted` was called for this referral. */
+  rewardAttempts?: number | null | undefined;
+  /** When the last call of `onReferralCompleted` started. */
+  rewardAttemptAt?: Date | null | undefined;
+}
+
+/** Delivery of `onReferralCompleted`, see `retryReferralRewards`. */
+export type RewardStatus = "pending" | "rewarded";
+
+/** A place of `maxReferralsPerUser`, as stored in the `referralSlot` table. */
+export interface ReferralSlot {
+  id: string;
+  referrerUserId: string;
+  /** The referral holding the place. Unique. */
+  referralId: string;
+  /** `<referrerUserId>:<n>`. Unique. */
+  key: string;
+  createdAt: Date;
 }
 
 /** A completed step of a referral, as stored in the `referralStep` table. */
@@ -53,6 +77,18 @@ export interface ReferralCandidate {
   code: string;
   /** The request that created the user, `null` outside a request. */
   context: GenericEndpointContext | null;
+}
+
+export interface RewardRetryOptions {
+  /**
+   * How long after a call of `onReferralCompleted` started it may be
+   * retried, in milliseconds, if it hasn't succeeded by then. Longer than
+   * the callback ever takes, so a call still running isn't retried.
+   * Defaults to 5 minutes.
+   */
+  delay?: number | undefined;
+  /** How often `onReferralCompleted` is called for a referral at most. Defaults to `10`. */
+  maxAttempts?: number | undefined;
 }
 
 export interface ReferralOptions {
@@ -104,10 +140,16 @@ export interface ReferralOptions {
     | ((details: { referral: Referral; step: string }) => void | Promise<void>)
     | undefined;
   /**
-   * Called once per referral, when every required step is done: grant
-   * rewards here. Errors are logged.
+   * Called when every required step of a referral is done: grant rewards
+   * here. Called right after the referral is saved as `completed`. Errors
+   * are logged; call `auth.api.retryReferralRewards` regularly (from a
+   * cron job) to call it again for referrals whose call failed or never
+   * finished. It can then run more than once for a referral, so make the
+   * reward idempotent on `referral.id`.
    */
   onReferralCompleted?: ((referral: Referral) => void | Promise<void>) | undefined;
+  /** When `retryReferralRewards` calls `onReferralCompleted` again. */
+  rewardRetry?: RewardRetryOptions | undefined;
   /**
    * Show referrers the emails of the users they referred only masked
    * (`a***@example.com`). Defaults to `true`.
@@ -143,6 +185,7 @@ export interface ResolvedReferralOptions {
   onReferral: ReferralOptions["onReferral"];
   onStepCompleted: ReferralOptions["onStepCompleted"];
   onReferralCompleted: ReferralOptions["onReferralCompleted"];
+  rewardRetry: Required<RewardRetryOptions>;
   maskEmails: boolean;
   hideNames: boolean;
   adminRoles: readonly string[];

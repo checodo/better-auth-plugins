@@ -7,14 +7,20 @@ import type { Adapter } from "./store";
 import {
   completeReferral,
   countReferrals,
+  countSlots,
   createCode,
+  createSlot,
   createStep,
   findCodeByCode,
   findCodeByUserId,
+  findSlotByKey,
   findStep,
   isReferrerBlocked,
+  markRewarded,
   replaceCode,
+  slotKey,
   stepsByReferral,
+  takenSlotKeys,
 } from "./store";
 import type { Referral, ReferralCode, ResolvedReferralOptions } from "./types";
 import { generateCode, isWellFormedCode, normalizeCode } from "./utils/code";
@@ -115,6 +121,50 @@ export async function findUsableCode(
   return stored;
 }
 
+/**
+ * Takes one of the referrer's `max` places for `referral`, once its
+ * sign-up is committed. Returns `false` when they are all taken; the
+ * caller then deletes the referral.
+ *
+ * A place is a row with a unique key (`referralSlot`), so two sign-ups
+ * can't take the same one, whatever order their transactions commit in.
+ * Referrals without a place (made before `maxReferralsPerUser` was set or
+ * before this version, or another sign-up's that isn't settled yet) take
+ * up places too, so the limit also holds for referrers who already have
+ * referrals. When sign-ups race for the last place, the first to settle
+ * gets it; at worst all of them lose it, and the place stays free for the
+ * next sign-up.
+ */
+export async function claimReferralPlace(
+  adapter: Adapter,
+  max: number,
+  referral: Pick<Referral, "id" | "referrerUserId">,
+): Promise<boolean> {
+  const { referrerUserId } = referral;
+  // Places first, then referrals: a referral that takes a place in
+  // between counts as one without a place, which only frees fewer places.
+  const slots = await countSlots(adapter, referrerUserId);
+  const referrals = await countReferrals(adapter, { referrerUserId });
+  const withoutPlace = Math.max(0, referrals - slots - 1);
+  const places = max - withoutPlace;
+  if (places <= 0) return false;
+
+  const taken = await takenSlotKeys(adapter, referrerUserId, places);
+  for (let place = 0; place < places; place++) {
+    const key = slotKey(referrerUserId, place);
+    if (taken.has(key)) continue;
+    try {
+      await createSlot(adapter, { referrerUserId, referralId: referral.id, key });
+      return true;
+    } catch (error) {
+      // Taken by a concurrent sign-up since it was read: try the next one.
+      if (await findSlotByKey(adapter, key)) continue;
+      throw error;
+    }
+  }
+  return false;
+}
+
 /** Records a completed referral in the audit log, for the referrer it rewards. */
 function recordCompleted(referral: Referral): Promise<void> {
   return recordAuditEvent({
@@ -126,8 +176,31 @@ function recordCompleted(referral: Referral): Promise<void> {
 }
 
 /**
- * Marks `referral` completed once all required steps are done, and runs
- * `onReferralCompleted` exactly once.
+ * Calls `onReferralCompleted` for a referral that was just completed, and
+ * records it as rewarded once the call returns without an error. A call
+ * that fails (or never finishes) is retried by `retryReferralRewards`.
+ */
+async function deliverReward(
+  adapter: Adapter,
+  context: Callbacks,
+  options: ResolvedReferralOptions,
+  referral: Referral,
+): Promise<void> {
+  const { onReferralCompleted } = options;
+  if (!onReferralCompleted) return;
+  await runCallback(
+    context,
+    "referral",
+    "onReferralCompleted",
+    () => onReferralCompleted(referral),
+    () => markRewarded(adapter, referral.id),
+  );
+}
+
+/**
+ * Marks `referral` completed once all required steps are done. Only the
+ * request whose conditional update completes it calls `onReferralCompleted`
+ * (see `deliverReward`).
  */
 async function completeIfDone(
   adapter: Adapter,
@@ -139,16 +212,13 @@ async function completeIfDone(
   const done = new Set((await stepsByReferral(adapter, [referral.id])).get(referral.id));
   if (!options.steps.every((step) => done.has(step))) return referral;
 
-  const completed = await completeReferral(adapter, referral.id);
+  const completed = await completeReferral(adapter, referral.id, {
+    trackReward: !!options.onReferralCompleted,
+  });
   // null: another request completed it first and runs the callback.
   if (!completed) return { ...referral, status: "completed" };
   await recordCompleted(completed);
-  const { onReferralCompleted } = options;
-  if (onReferralCompleted) {
-    await runCallback(context, "referral", "onReferralCompleted", () =>
-      onReferralCompleted(completed),
-    );
-  }
+  await deliverReward(adapter, context, options, completed);
   return completed;
 }
 
@@ -193,6 +263,7 @@ export async function recordStep(
  * if it was created completed (no steps required).
  */
 export async function referralCreated(
+  adapter: Adapter,
   context: Callbacks,
   options: ResolvedReferralOptions,
   referral: Referral,
@@ -208,11 +279,7 @@ export async function referralCreated(
     },
   });
   if (referral.status === "completed") await recordCompleted(referral);
-  const { onReferral, onReferralCompleted } = options;
+  const { onReferral } = options;
   if (onReferral) await runCallback(context, "referral", "onReferral", () => onReferral(referral));
-  if (referral.status === "completed" && onReferralCompleted) {
-    await runCallback(context, "referral", "onReferralCompleted", () =>
-      onReferralCompleted(referral),
-    );
-  }
+  if (referral.status === "completed") await deliverReward(adapter, context, options, referral);
 }

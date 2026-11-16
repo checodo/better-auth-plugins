@@ -86,6 +86,28 @@ export async function updateEntry(
 }
 
 /**
+ * Updates the entry only while it still matches `expected` (besides its
+ * id), in one conditional write. Returns `null` when it no longer does:
+ * another request changed it first. Used for every transition that sends
+ * an email or runs a callback, so concurrent requests can't both do it.
+ * Compare fields that change with the transition (`status`, `tokenHash`,
+ * `inviteCodeHash`), never dates, whose precision differs between
+ * databases.
+ */
+export async function updateEntryIf(
+  adapter: Adapter,
+  id: string,
+  expected: Where[],
+  update: WaitlistEntryUpdate,
+): Promise<WaitlistEntry | null> {
+  return adapter.update<WaitlistEntry>({
+    model: MODEL,
+    where: [{ field: "id", value: id }, ...expected],
+    update: { updatedAt: new Date(), ...update },
+  });
+}
+
+/**
  * Deletes unconfirmed entries whose confirmation link was last sent
  * before `cutoff`, so emails nobody confirmed aren't kept.
  */

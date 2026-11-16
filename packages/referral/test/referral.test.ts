@@ -1,9 +1,11 @@
+import { testDatabase } from "@repo/tooling/test-helpers";
 import { admin, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
 import { referralClient } from "../src/client";
 import type { Referral, ReferralOptions } from "../src/index";
 import { referral } from "../src/index";
+import { claimReferralPlace } from "../src/referrals";
 import { CODE_ALPHABET } from "../src/utils/code";
 
 const PASSWORD = "password1234";
@@ -27,7 +29,7 @@ async function setup(options: ReferralOptions = {}) {
         testUtils(),
       ],
     },
-    { disableTestUser: true, clientOptions: { plugins: [referralClient()] } },
+    { ...testDatabase(), disableTestUser: true, clientOptions: { plugins: [referralClient()] } },
   );
   const context = await auth.$context;
   const { test } = context;
@@ -237,7 +239,8 @@ describe("attribution", () => {
 
   it("holds maxReferralsPerUser when sign-ups race for the last place", async () => {
     // Another sign-up with the same code is recorded after this one passed
-    // the code check (both saw a free place); the earlier one keeps it.
+    // the code check (both saw a free place). Its referral, not settled
+    // yet, takes up the place, so this one doesn't get it.
     let race: (() => Promise<void>) | undefined;
     const onReferral = vi.fn();
     const { context, referrer, signUp, referralOf, createUser } = await setup({
@@ -269,6 +272,67 @@ describe("attribution", () => {
     expect(await referralOf(bob.user.id)).toBeNull();
     expect(await referralOf(carol.user.id)).not.toBeNull();
     expect(onReferral).not.toHaveBeenCalled();
+  });
+
+  it("holds maxReferralsPerUser when transactions commit out of order", async () => {
+    // Two sign-ups: the earlier one's transaction commits after the later
+    // one has settled. Counting the referrals made earlier kept both.
+    const { context, referrer, createUser } = await setup({ maxReferralsPerUser: 1 });
+    const ada = await referrer();
+    const make = async (email: string, createdAt: Date) => {
+      const { user } = await createUser(email);
+      return context.adapter.create<Omit<Referral, "id">, Referral>({
+        model: "referral",
+        data: {
+          referrerUserId: ada.user.id,
+          referredUserId: user.id,
+          code: ada.code,
+          status: "pending",
+          completedAt: null,
+          createdAt,
+        },
+      });
+    };
+    const started = new Date(Date.now() - 1000);
+    const later = await make("carol@example.com", new Date());
+    expect(await claimReferralPlace(context.adapter, 1, later)).toBe(true);
+    // The earlier sign-up's row only becomes visible now.
+    const earlier = await make("bob@example.com", started);
+    expect(await claimReferralPlace(context.adapter, 1, earlier)).toBe(false);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBe(1);
+  });
+
+  it("gives exactly maxReferralsPerUser places to referrals settling at once", async () => {
+    const { context, referrer, createUser } = await setup({ maxReferralsPerUser: 2 });
+    const ada = await referrer();
+    const referrals: Referral[] = [];
+    for (const name of ["bob", "carol", "dan", "eve", "fay"]) {
+      const { user } = await createUser(`${name}@example.com`);
+      referrals.push(
+        await context.adapter.create<Omit<Referral, "id">, Referral>({
+          model: "referral",
+          data: {
+            referrerUserId: ada.user.id,
+            referredUserId: user.id,
+            code: ada.code,
+            status: "pending",
+            completedAt: null,
+            createdAt: new Date(),
+          },
+        }),
+      );
+    }
+    // Each settles as if the others were not visible yet: the only thing
+    // keeping them apart is the unique key of the place.
+    const claim = (one: Referral) =>
+      claimReferralPlace(
+        { ...context.adapter, count: async ({ model }) => (model === "referral" ? 1 : 0) },
+        2,
+        one,
+      );
+    const kept = await Promise.all(referrals.map(claim));
+    expect(kept.filter(Boolean)).toHaveLength(2);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBe(2);
   });
 
   it("counts maxReferralsPerUser across codes: a new code doesn't reset it", async () => {
@@ -487,6 +551,145 @@ describe("steps", () => {
       method: "POST",
       body: { userId: "x", step: "first-purchase" },
     });
+    expect(error?.status).toBe(404);
+  });
+});
+
+describe("reward retries", () => {
+  /** A referred user with one step left, and how to finish it. */
+  async function referredWithStep(options: ReferralOptions) {
+    const instance = await setup({ steps: ["first-purchase"], ...options });
+    const { code } = await instance.referrer();
+    const { user } = await instance.signUp("bob@example.com", { referralCode: code });
+    const finish = () =>
+      instance.auth.api.completeReferralStep({ body: { userId: user.id, step: "first-purchase" } });
+    const stored = async () => {
+      const referral = await instance.referralOf(user.id);
+      if (!referral) throw new Error("no referral");
+      return referral;
+    };
+    return { ...instance, user, finish, stored };
+  }
+  /** Runs `fn` with `Date` moved `minutes` ahead. */
+  async function later<T>(minutes: number, fn: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ now: Date.now() + minutes * 60_000, toFake: ["Date"] });
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("record a referral as rewarded once onReferralCompleted succeeds", async () => {
+    const onReferralCompleted = vi.fn();
+    const { finish, stored } = await referredWithStep({ onReferralCompleted });
+    await finish();
+    expect(onReferralCompleted).toHaveBeenCalledOnce();
+    expect(await stored()).toMatchObject({ rewardStatus: "rewarded", rewardAttempts: 1 });
+  });
+
+  it("call onReferralCompleted again after a failure, once the delay has passed", async () => {
+    let fail = true;
+    const onReferralCompleted = vi.fn(() => {
+      if (fail) throw new Error("reward service down");
+    });
+    const { auth, context, finish, stored } = await referredWithStep({ onReferralCompleted });
+    vi.spyOn(context.logger, "error").mockImplementation(() => {});
+    await finish();
+    expect(await stored()).toMatchObject({ rewardStatus: "pending", rewardAttempts: 1 });
+
+    // Too soon: the first call might still be running.
+    expect(await auth.api.retryReferralRewards({})).toEqual({ attempted: 0, rewarded: 0 });
+
+    fail = false;
+    expect(await later(6, () => auth.api.retryReferralRewards({}))).toEqual({
+      attempted: 1,
+      rewarded: 1,
+    });
+    expect(onReferralCompleted).toHaveBeenCalledTimes(2);
+    expect(onReferralCompleted).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "completed", rewardAttempts: 2 }),
+    );
+    expect(await stored()).toMatchObject({ rewardStatus: "rewarded", rewardAttempts: 2 });
+
+    // Rewarded: nothing left to retry.
+    expect(await later(20, () => auth.api.retryReferralRewards({}))).toEqual({
+      attempted: 0,
+      rewarded: 0,
+    });
+  });
+
+  it("stop after rewardRetry.maxAttempts", async () => {
+    const onReferralCompleted = vi.fn(() => {
+      throw new Error("reward service down");
+    });
+    const { auth, context, finish, stored } = await referredWithStep({
+      onReferralCompleted,
+      rewardRetry: { delay: 60_000, maxAttempts: 3 },
+    });
+    const logError = vi.spyOn(context.logger, "error").mockImplementation(() => {});
+    await finish();
+    for (const minutes of [2, 4, 6, 8]) {
+      await later(minutes, () => auth.api.retryReferralRewards({}));
+    }
+    expect(onReferralCompleted).toHaveBeenCalledTimes(3);
+    expect(await stored()).toMatchObject({ rewardStatus: "pending", rewardAttempts: 3 });
+    expect(logError).toHaveBeenCalledWith(
+      "[referral] onReferralCompleted threw an error",
+      expect.any(Error),
+    );
+  });
+
+  it("call onReferralCompleted once when retries run at once", async () => {
+    let fail = true;
+    const onReferralCompleted = vi.fn(() => {
+      if (fail) throw new Error("reward service down");
+    });
+    const { auth, context, finish } = await referredWithStep({ onReferralCompleted });
+    vi.spyOn(context.logger, "error").mockImplementation(() => {});
+    await finish();
+    fail = false;
+
+    const results = await later(6, () =>
+      Promise.all(Array.from({ length: 3 }, () => auth.api.retryReferralRewards({}))),
+    );
+    expect(results.reduce((sum, result) => sum + result.attempted, 0)).toBe(1);
+    expect(onReferralCompleted).toHaveBeenCalledTimes(2);
+  });
+
+  it("never call onReferralCompleted for referrals completed without it", async () => {
+    // A referral completed before onReferralCompleted was set, or before
+    // this version: no reward fields.
+    const onReferralCompleted = vi.fn();
+    const { auth, context, referrer, createUser } = await setup({ onReferralCompleted });
+    const ada = await referrer();
+    const { user } = await createUser("bob@example.com");
+    await context.adapter.create({
+      model: "referral",
+      data: {
+        referrerUserId: ada.user.id,
+        referredUserId: user.id,
+        code: ada.code,
+        status: "completed",
+        completedAt: new Date(Date.now() - 86_400_000),
+        createdAt: new Date(Date.now() - 86_400_000),
+      },
+    });
+    expect(await later(60, () => auth.api.retryReferralRewards({}))).toEqual({
+      attempted: 0,
+      rewarded: 0,
+    });
+    expect(onReferralCompleted).not.toHaveBeenCalled();
+  });
+
+  it("do nothing without onReferralCompleted", async () => {
+    const { auth } = await setup();
+    expect(await auth.api.retryReferralRewards({})).toEqual({ attempted: 0, rewarded: 0 });
+  });
+
+  it("aren't reachable over HTTP", async () => {
+    const { client } = await setup();
+    const { error } = await client.$fetch("/referral/retry-rewards", { method: "POST", body: {} });
     expect(error?.status).toBe(404);
   });
 });

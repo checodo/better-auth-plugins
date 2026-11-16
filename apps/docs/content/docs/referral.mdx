@@ -12,8 +12,9 @@ it.
 - Steps before a referral counts, such as a verified email or a first
   purchase, so fake accounts don't earn rewards. Apps that send
   verification emails require a verified email by default.
-- `onReferralCompleted` runs exactly once per referral: grant the reward
-  there.
+- `onReferralCompleted` runs when a referral completes: grant the reward
+  there. Failed calls can be retried from a cron job (see
+  [Delivering rewards](#delivering-rewards)).
 - Referrers see who they referred with masked emails; codes don't reveal
   whose they are.
 
@@ -53,8 +54,8 @@ export const auth = betterAuth({
 
 ### Migrate the database
 
-The plugin adds the `referralCode`, `referral`, and `referralStep` tables
-(see [Schema](#schema)).
+The plugin adds the `referralCode`, `referral`, `referralStep`, and
+`referralSlot` tables (see [Schema](#schema)).
 
 <Tabs items={["migrate", "generate"]}>
 <Tab value="migrate">
@@ -230,8 +231,8 @@ referral({
     console.log(`${referral.referredUserId} completed ${step}`);
   },
   onReferralCompleted: async (referral) => {
-    // runs once per referral
-    await grantCredit(referral.referrerUserId);
+    // can run again on a retry: key the reward on referral.id
+    await grantCredit(referral.referrerUserId, { idempotencyKey: referral.id });
   },
 });
 ```
@@ -256,6 +257,48 @@ await auth.api.completeReferralStep({
 can't complete steps themselves. Each step counts once; recording it again
 changes nothing. Steps that aren't in `steps` fail with
 `UNKNOWN_REFERRAL_STEP`.
+
+#### Delivering rewards
+
+A referral is saved as `completed` in a single conditional update, so
+however many requests complete its last step at once, only one of them
+calls `onReferralCompleted`, right after that update. The referral
+records the call: `rewardStatus` is `"pending"` until the callback
+returns without an error, then `"rewarded"`.
+
+If the callback throws, the error is logged and the referral stays
+`"pending"`; if the process stops before the callback returns, too. Call
+`retryReferralRewards` regularly, for example every few minutes from a
+cron job, to call it again for those referrals:
+
+```ts title="server"
+// e.g. in a cron route
+const { attempted, rewarded } = await auth.api.retryReferralRewards({
+  body: { limit: 50 }, // optional, at most 500
+});
+```
+
+- A call is retried once `rewardRetry.delay` (5 minutes by default) has
+  passed since it started, so a call still running isn't started again.
+  Set it longer than your callback can take.
+- After `rewardRetry.maxAttempts` calls (10 by default), a referral is
+  left `"pending"` and no longer retried. Find those with
+  `listAllReferrals` (`rewardStatus` and `rewardAttempts` are in each
+  referral) to look into them.
+- Concurrent retries don't call the callback twice for the same attempt:
+  each takes the referral with a conditional update first.
+- Referrals completed without `onReferralCompleted` set, or before this
+  was tracked, have no `rewardStatus` and are never retried, so setting
+  the callback later doesn't pay out old referrals.
+- `retryReferralRewards` is server only, like `completeReferralStep`.
+
+Delivery is *at least once*: if the process stops after your callback
+granted the reward but before the referral was marked `"rewarded"`, the
+next retry calls it again. Make the reward idempotent, keyed on
+`referral.id`, so granting it twice credits once.
+
+`onReferral` and `onStepCompleted` are not tracked or retried: if they
+throw, the error is logged.
 
 ### Your referrals
 
@@ -307,11 +350,18 @@ Also consider:
 
 - `maxReferralsPerUser`, so one user can't earn unlimited rewards. It
   counts across all their codes, so `regenerateCode` doesn't reset it, and
-  it holds when sign-ups with the same code happen at the same time: the
-  referral is checked again once the user is saved, and the earliest
-  referrals keep their places. A sign-up that loses the race is a normal
-  sign-up without a referral (`onReferral` doesn't run), even with
-  `invalidCode: "reject"`, since the user exists by then.
+  it holds when sign-ups with the same code happen at the same time, in
+  whatever order their transactions commit: once the user is saved, the
+  referral takes one of the referrer's places, each a row with a unique
+  key in `referralSlot`, and is dropped if none is free. When sign-ups
+  race for the last place, the first to settle gets it (at worst none
+  does, and the place stays free for the next sign-up). A sign-up that
+  loses is a normal sign-up without a referral (`onReferral` doesn't
+  run), even with `invalidCode: "reject"`, since the user exists by then.
+  Referrals made before the limit was set count toward it. Lowering the
+  limit doesn't remove referrals already made; a referral deleted with its
+  user frees its place (see [Database](/docs/database#personal-data) for
+  databases without foreign keys).
 - Banning fraudsters with better-auth's
   [admin plugin](https://better-auth.com/docs/plugins/admin): a banned
   user's code stops working until the ban ends, so new sign-ups no longer
@@ -353,7 +403,8 @@ betterAuth({
 ### When things fail
 
 Referrals never break sign-up: if recording a referral fails, or a
-callback throws, the error is logged and the user is signed up anyway. The
+callback throws, the error is logged and the user is signed up anyway.
+Only `onReferralCompleted` can be retried (see [Delivering rewards](#delivering-rewards)). The
 referral is recorded only after the sign-up has been saved: if the sign-up
 fails, no referral is recorded and no callback runs.
 
@@ -385,6 +436,7 @@ const { data } = await authClient.referral.listAllReferrals({
 | `GET /referral/list-referrals`      | `authClient.referral.listReferrals`    | `auth.api.listReferrals`         |
 | `GET /referral/list-all-referrals`  | `authClient.referral.listAllReferrals` | `auth.api.listAllReferrals`      |
 | (server only)                       | -                                      | `auth.api.completeReferralStep`  |
+| (server only)                       | -                                      | `auth.api.retryReferralRewards`  |
 
 ## Schema
 
@@ -425,6 +477,13 @@ Table: `referral`
       required: true,
     },
     completedAt: { type: "Date", description: "When the referral was completed." },
+    rewardStatus: {
+      type: '"pending" | "rewarded"',
+      description:
+        "Delivery of `onReferralCompleted`: `pending` until it returns without an error. Empty without the callback. Indexed.",
+    },
+    rewardAttempts: { type: "number", description: "How often `onReferralCompleted` was called." },
+    rewardAttemptAt: { type: "Date", description: "When the last call of `onReferralCompleted` started." },
     createdAt: { type: "Date", description: "When the referred user signed up.", required: true },
   }}
 />
@@ -442,6 +501,32 @@ Table: `referralStep`
     step: { type: "string", description: "The step, from `steps`.", required: true },
     metadata: { type: "string", description: "JSON-encoded `metadata` from `completeReferralStep`." },
     completedAt: { type: "Date", description: "When the step was completed.", required: true },
+  }}
+/>
+
+The places of `maxReferralsPerUser` are only written when it is set.
+
+Table: `referralSlot`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the place.", required: true },
+    referrerUserId: {
+      type: "string",
+      description: "The referrer. Indexed; deleted with the user.",
+      required: true,
+    },
+    referralId: {
+      type: "string",
+      description: "The referral holding the place. Unique; deleted with the referral.",
+      required: true,
+    },
+    key: {
+      type: "string",
+      description: "`<referrerUserId>:<n>`, with `n` below `maxReferralsPerUser`. Unique.",
+      required: true,
+    },
+    createdAt: { type: "Date", description: "When the place was taken.", required: true },
   }}
 />
 
@@ -497,7 +582,11 @@ if (error?.code === REFERRAL_ERROR_CODES.INVALID_REFERRAL_CODE.code) {
     onReferralCompleted: {
       type: "(referral) => void | Promise<void>",
       description:
-        "Called once per referral, when every step is done. Grant rewards here. Errors are logged.",
+        "Called when every step is done. Grant rewards here. Errors are logged; `retryReferralRewards` calls it again, so it can run more than once: see [Delivering rewards](#delivering-rewards).",
+    },
+    rewardRetry: {
+      type: "{ delay?, maxAttempts? }",
+      description: "When `retryReferralRewards` calls `onReferralCompleted` again. See [Reward retry options](#reward-retry-options).",
     },
     allowReferral: {
       type: "({ referrerUserId, referredUser, code, context }) => boolean | Promise<boolean>",
@@ -552,8 +641,26 @@ if (error?.code === REFERRAL_ERROR_CODES.INVALID_REFERRAL_CODE.code) {
       description: "User ids that may list all referrals, whatever their role.",
     },
     schema: {
-      type: "{ referralCode?, referral?, referralStep? }",
+      type: "{ referralCode?, referral?, referralStep?, referralSlot? }",
       description: "Rename the tables or their columns. See [Schema](#schema).",
+    },
+  }}
+/>
+
+### Reward retry options
+
+<TypeTable
+  type={{
+    delay: {
+      type: "number",
+      default: "300000",
+      description:
+        "Milliseconds after a call of `onReferralCompleted` started before it may be retried. At least 1000; longer than the callback can take.",
+    },
+    maxAttempts: {
+      type: "number",
+      default: "10",
+      description: "How often `onReferralCompleted` is called for a referral at most.",
     },
   }}
 />
