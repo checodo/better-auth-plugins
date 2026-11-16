@@ -1,0 +1,275 @@
+---
+title: Compliance
+description: Which SOC 2, ISO 27001, and GDPR controls the plugins can contribute to, and what is still up to you.
+---
+
+<Callout type="warn" title="Not legal advice: informational guidance only">
+  This page provides general, non-binding technical information about how
+  these plugins may support selected security, privacy, and compliance
+  controls.
+
+  It does not constitute legal advice, data protection advice, compliance
+  advice, an audit opinion, or a certification. The control mappings are
+  illustrative interpretations based on the plugins' functionality. They
+  are not official interpretations, endorsements, or certifications by
+  AICPA, ISO, NIST, or any regulatory authority.
+
+  Using these plugins does not make an application or organization
+  compliant with SOC 2, ISO 27001, GDPR, or any other framework or
+  regulation. No guarantee is made that an auditor, certification body,
+  or supervisory authority will accept any particular implementation as
+  satisfying a requirement.
+
+  Whether a control is applicable or effective depends on your specific
+  organization, processing activities, configuration, infrastructure,
+  policies, procedures, and supporting evidence. You remain responsible
+  for assessing and meeting your applicable obligations.
+
+  Consult qualified legal counsel, your data protection officer, and your
+  independent auditor to determine which requirements apply and how they
+  should be implemented. Always verify requirements against the current
+  authoritative standards and legislation.
+</Callout>
+
+For each plugin: the controls it **can contribute to**, how, and what is
+**left to you**. The end of the page lists [known gaps](#known-gaps) and
+[what no plugin here covers](#not-covered).
+
+## Frameworks
+
+| Framework | Version                                                                   | IDs on this page              |
+| --------- | ------------------------------------------------------------------------- | ----------------------------- |
+| SOC 2     | AICPA Trust Services Criteria 2017 (TSP section 100)                      | `CC6.1`, `P4.2`, ...          |
+| ISO 27001 | ISO/IEC 27001:2022, Annex A (titles as in ISO/IEC 27002:2022)             | `A.8.15`, ...                 |
+| GDPR      | Regulation (EU) 2016/679                                                  | `Art. 32`, `Art. 5(1)(e)`, ... |
+| NIST      | SP 800-63B-4, Digital Identity Guidelines: Authentication (2025), passwords only | `§3.1.1.2`, ...       |
+
+The SOC 2, GDPR, and NIST IDs were checked against the published texts
+in November 2026. ISO standards aren't freely available: check the ISO
+control titles against your copy.
+
+The SOC 2 mappings are based on the 2017 Trust Services Criteria and the
+applicable revised points of focus. On October 28, 2026, the AICPA
+published a proposed 2027 revision as an exposure draft. The proposal
+includes restructuring and revisions to the criteria and may change
+existing control references. It is not yet final. Confirm the applicable
+criteria and mappings with your auditor, particularly if your
+organization plans to use the proposed framework.
+
+## At a glance
+
+The mappings below are illustrative and describe potential contributions
+of the plugins to selected controls. They are not exhaustive compliance
+mappings and do not establish that a control is implemented or
+effective. The applicability and sufficiency of each control must be
+assessed in the context of your organization's risks, policies,
+processes, and supporting evidence, together with your auditor or
+qualified adviser.
+
+| Plugin                            | SOC 2                                  | ISO 27001                                     | GDPR                              | NIST SP 800-63B-4 |
+| --------------------------------- | -------------------------------------- | --------------------------------------------- | --------------------------------- | ----------------- |
+| [Audit log](#audit-log)           | CC6.2, CC6.3, CC7.2, CC7.3, P4.2, P4.3 | A.5.28, A.8.2, A.8.10, A.8.11, A.8.15, A.8.16 | Art. 5(1)(c), 5(1)(e), 15, 32, 33 | -                 |
+| [Authentication](#authentication) | CC6.1                                  | A.5.16, A.8.5                                 | Art. 5(1)(c)                      | -                 |
+| [Blocklist](#blocklist)           | CC6.1, CC6.2, CC6.6                    | A.5.16, A.5.17, A.8.5                         | Art. 32                           | §3.1.1.2          |
+| [Referral](#referral)             | -                                      | -                                             | Art. 5(1)(c), 17                  | -                 |
+| [Waitlist](#waitlist)             | CC6.2, P2.1                            | A.5.16, A.5.34                                | Art. 5(1)(e), 7, 17               | -                 |
+
+The referral plugin isn't a security control. It is listed for the
+personal data it stores.
+
+GDPR compliance depends on the purposes and circumstances of the
+processing, not only on what a plugin stores:
+
+- **Pseudonymous ids are still personal data** when they can be linked
+  to a person. Storing user ids instead of names or emails can support
+  data minimization; it doesn't take the data out of the GDPR.
+- **Data minimization is contextual.** Fewer fields don't by themselves
+  satisfy Art. 5(1)(c): the data must be adequate, relevant, and limited
+  to what your purpose needs.
+- **Storage limitation needs operation.** An optional retention feature
+  doesn't establish that data is deleted once it is no longer needed.
+- **Deletion isn't the whole of erasure.** Rows deleted by a plugin can
+  still exist in backups, logs, and other copies, and legal retention
+  obligations may require you to keep some data.
+
+## Audit log
+
+The [audit log](/docs/audit-log) records sign-ins, failed sign-ins,
+account changes, and admin actions, and the events of the other plugins.
+
+| Control                                                          | How the plugin can contribute                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| SOC 2 CC7.2 (monitors for anomalies), ISO A.8.16 (Monitoring activities) | Failed sign-ins, blocked requests, and admin actions with a [severity](/docs/audit-log#events); [`onEvent`](/docs/audit-log#forwarding-events) forwards them to your monitoring or SIEM |
+| SOC 2 CC7.3 (evaluates security events), GDPR Art. 33            | Audit events provide evidence that can help investigate security incidents and assess whether a personal data breach requires notification under Art. 33. The organization remains responsible for assessing and making any required notifications within the applicable deadlines |
+| SOC 2 CC6.2, CC6.3 (registers, authorizes, modifies, removes access), ISO A.8.2 (Privileged access rights) | Sign-ups, role changes, bans, impersonation, and deleted users, with the admin who did it: evidence for access reviews |
+| ISO A.8.15 (Logging), A.5.28 (Collection of evidence), GDPR Art. 32(1)(b) | Events in their own table. The optional [hash chain](/docs/audit-log#hash-chain), off by default, can help detect certain changes or deletions of recorded events when enabled |
+| SOC 2 P4.2, P4.3, ISO A.8.10 (Information deletion), GDPR Art. 5(1)(e) | The opt-in [`retention`](/docs/audit-log#retention) deletes eligible audit events when cleanup runs. This can support retention and deletion controls, but backups and other copies remain your responsibility |
+| ISO A.8.11 (Data masking), GDPR Art. 5(1)(c)                     | `captureIp` and `captureUserAgent` turn data off; [`beforeLog`](/docs/audit-log#privacy) can pseudonymize it; metadata under recognized secret-related keys is redacted (see below) |
+| GDPR Art. 15                                                     | Users can list their own audit events. This may support an access request, but it does not provide a complete export of all personal data processed by the organization |
+
+Left to you:
+
+- **Set `retention`.** It is opt-in: without it, audit events are not
+  automatically deleted. If IP capture is enabled (`captureIp`, on by
+  default), those addresses remain in the stored events. The automatic sweep is started by
+  recorded events, so it isn't a guaranteed periodic cleanup. Configure
+  retention explicitly and schedule `deleteExpiredAuditEvents` if you
+  require predictable periodic cleanup. The plugin does not replace your
+  organization's retention policy or determine which retention period is
+  legally appropriate; document the period in your privacy policy.
+- **Look at the log.** Recording is not monitoring: alert on critical
+  events (`onEvent`) and review admin actions regularly.
+- **Protect the log.** Restrict who can write to the database. The hash
+  chain does not independently protect against an attacker who can
+  modify both the event database and the chain key. For stronger tamper
+  evidence, protect the chain key separately and retain the latest chain
+  hash in an independently controlled location, see
+  [what the chain protects against](/docs/audit-log#hash-chain).
+- **Secrets in metadata.** Metadata values under recognized
+  secret-related property names (`password`, `token`, `secret`,
+  `apiKey`, ...) are recursively redacted. This is key-name-based
+  protection, not comprehensive secret detection. Avoid placing
+  sensitive values under unrelated property names, and make sure custom
+  `beforeLog` transformations, which run after the redaction, don't
+  reintroduce secrets.
+- **Erasure requests.** Events are kept when a user is deleted. Delete or
+  pseudonymize their events yourself, see [Privacy](/docs/audit-log#privacy).
+- **Clock synchronization (ISO A.8.17):** Audit events use the
+  application server's clock. You are responsible for synchronizing
+  your servers and other relevant systems to approved time sources.
+
+## Authentication
+
+The [authentication](/docs/authentication) plugin adds sign-in with
+Steam, Epic Games, and Xbox.
+
+| Control                                                       | How the plugin can contribute                                                          |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| SOC 2 CC6.1, ISO A.8.5 (Secure authentication), A.5.16 (Identity management) | Users are identified by the provider's account id; your app stores no password for them |
+| GDPR Art. 5(1)(c)                                             | By default, the plugin generates a placeholder email address and does not request a real email address from the provider. Your custom `mapProfileToUser` implementation can override this behavior. Whether the remaining profile fields are necessary depends on your application's purpose |
+
+Left to you:
+
+- **The provider decides how secure the sign-in is.** Two-step
+  verification on Steam, Epic, or Xbox is the player's choice; you can't
+  require it. Add better-auth's
+  [two-factor plugin](https://better-auth.com/docs/plugins/2fa) if your
+  app needs a second factor of its own.
+- **You can't email these users.** Their
+  [placeholder emails](/docs/authentication#placeholder-emails) receive
+  nothing: no password resets, no security notices, no breach
+  notification. Ask for a real email if you need to reach them.
+
+## Blocklist
+
+The [blocklist](/docs/blocklist) stops disallowed emails, usernames,
+names, passwords, and IP addresses.
+
+| Control                                                       | How the plugin can contribute                                                          |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| SOC 2 CC6.1, ISO A.5.17 (Authentication information), A.8.5   | [Password rules](/docs/blocklist#passwords) and the context check (the email, username, or app name in a password), on every endpoint that sets a password |
+| NIST SP 800-63B-4 §3.1.1.2                                    | Exact, whole-password matching can support the NIST password blocklist requirement, provided the application supplies an appropriate list of commonly used, expected, and compromised passwords. The plugin also supports additional matching modes and context-word checks; these are application-specific restrictions and should not be presented as the NIST-required comparison |
+| SOC 2 CC6.2, ISO A.5.16                                       | With the [predefined lists](/docs/blocklist#predefined-lists), disposable email domains and reserved usernames (`admin`, `support`) can't register, also through OAuth and admin endpoints |
+| SOC 2 CC6.6 (threats from outside the system), GDPR Art. 32   | [IP addresses, ranges, and countries](/docs/blocklist#ip-addresses-and-countries) can be kept from signing up or signing in |
+
+Left to you:
+
+- **The password list itself.** The plugin doesn't ship a list of
+  common passwords. For the NIST comparison, supply commonly used and
+  expected passwords as `exact` rules (the default rule type), and
+  check for compromised passwords with better-auth's
+  [`haveIBeenPwned`](https://better-auth.com/docs/plugins/have-i-been-pwned)
+  plugin.
+- **The extra checks are your policy.** `prefix`, `suffix`, and
+  `contains` rules, as well as `regex` patterns that match substrings,
+  can reject passwords based on parts of their contents. The context
+  check also compares context-derived words against the password.
+  These are additional restrictions beyond NIST's whole-password
+  blocklist comparison. Consider whether they reject legitimate
+  passphrases, and turn the context check off with
+  `checkContext: false` if necessary.
+- **Password length.** Set by better-auth (`emailAndPassword.minPasswordLength`,
+  8 by default). NIST asks for at least 15 characters when the password
+  is the only factor, 8 with a second factor.
+- **Failed attempts per account** (NIST §3.2.2): not counted by any plugin
+  here. better-auth's [rate limiter](https://better-auth.com/docs/concepts/rate-limit)
+  counts per IP address.
+- **IP rules are not a network control.** They keep out casual abuse,
+  not someone with a VPN; your firewall or WAF is the network control.
+
+## Referral
+
+The [referral](/docs/referral) plugin stores who referred whom, and the
+steps toward a reward.
+
+| Control           | How the plugin can contribute                                                           |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| GDPR Art. 5(1)(c) | Stores user ids, not emails or names. The ids are still personal data, and step metadata is whatever your server passes |
+| GDPR Art. 17      | Codes and referrals are deleted with the user, through foreign keys. This can support erasure; backups, audit logs, and other copies are yours to handle |
+
+Left to you:
+
+- **Without foreign keys** (MongoDB, some custom adapters), delete a
+  user's referral rows yourself, see [Personal data](/docs/database#personal-data).
+- **Keep step metadata small.** Whatever you pass is stored, and it can
+  contain personal data.
+- **Say in your privacy policy** that referrals are recorded, if you pay
+  rewards or show them.
+
+## Waitlist
+
+The [waitlist](/docs/waitlist) gates sign-up behind admin approval.
+
+| Control                                                    | How the plugin can contribute                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| SOC 2 CC6.2 (registers and authorizes new users before access), ISO A.5.16 | Every way of creating a user is gated: only approved emails (and what you let through with `allow` or `bypass`) get an account; with the audit log, approvals are recorded |
+| SOC 2 P2.1, GDPR Art. 7                                    | [Double opt-in](/docs/waitlist#double-opt-in) verifies the email address before an entry counts, and the leave link lets a person leave the waitlist and deletes the entry. These features can support a consent process, but they do not establish or record valid consent by themselves (see below) |
+| GDPR Art. 5(1)(e), ISO A.5.34 (Privacy and protection of PII) | Unconfirmed entries are deleted once their link has expired, the next time someone joins   |
+
+Left to you:
+
+- **Email verification is not proof of consent.** The confirmation link
+  verifies control of the email address and records that the person
+  confirmed their waitlist entry. If consent is your legal basis, you
+  must also present a clear, specific consent statement and retain
+  evidence of what the person agreed to, when, and how. Store the
+  relevant purpose and notice version alongside the confirmation: pass
+  them as `metadata` in the join request; it is stored with the entry.
+- **Direct invitations skip email verification.** An admin can invite an
+  unconfirmed email directly (`createInvite`). The application must
+  determine and document the appropriate legal basis for processing
+  that email address. If consent is the legal basis, obtain and retain
+  evidence of valid consent separately.
+- **Old entries.** Rejected and registered entries are kept until an
+  admin deletes them. Delete what you no longer need, see
+  [Privacy](/docs/waitlist#privacy).
+- **Deleted users.** Their entry is kept as `registered`; delete it with
+  `deleteEntry`.
+
+## Known gaps
+
+Things the plugins don't do yet, so you don't find out in an audit:
+
+- **Deleting a user doesn't delete everything.** Waitlist entries and
+  audit events stay; referral rows rely on foreign keys. The
+  [Personal data](/docs/database#personal-data) table lists every table.
+- **No export endpoint for audit events.** Page through
+  `auth.api.listAuditEvents` to hand events to an auditor or to a user.
+- **No account lockout.** Failed sign-ins are recorded and rate limited
+  per IP address, not counted per account.
+- **No confirmation time on waitlist entries.** An entry shows that its
+  email was confirmed (its status), not when.
+
+## Not covered
+
+Common audit topics that none of these plugins touch. better-auth
+itself, your infrastructure, or your organization covers them:
+
+- Multi-factor authentication and passkeys: better-auth's
+  [two-factor](https://better-auth.com/docs/plugins/2fa) and
+  [passkey](https://better-auth.com/docs/plugins/passkey) plugins.
+- Session lifetime and revocation: better-auth's
+  [session options](https://better-auth.com/docs/concepts/session-management).
+- Encryption at rest and backups: your database.
+- Access reviews, policies, training, and incident response: your
+  organization.

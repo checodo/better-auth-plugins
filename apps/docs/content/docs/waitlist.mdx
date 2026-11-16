@@ -140,8 +140,8 @@ approved, and `onJoin` and `autoApprove` run after the confirmation.
   whether an email went out or not.
 - Opening the link several times, also at the same time, confirms the
   entry once: `onJoin` and `autoApprove` run once.
-- Unconfirmed entries whose link has expired are deleted, so emails nobody
-  confirmed aren't kept.
+- Unconfirmed entries whose link has expired are deleted the next time
+  someone joins, so emails nobody confirmed aren't kept.
 - An admin can still invite an unconfirmed email directly (see
   [Managing the waitlist](#managing-the-waitlist)), for example someone who
   asked in person. That is the admin's call.
@@ -376,7 +376,8 @@ may fail; the place stays free for the next try.
   your emails, so people can withdraw and have their entry deleted.
 </Callout>
 
-Unconfirmed entries are deleted when their link expires. All other entries,
+Unconfirmed entries are deleted once their link has expired, the next time
+someone joins. All other entries,
 including rejected and registered ones, stay until someone leaves or an
 admin deletes them: delete what you no longer need, for example rejected
 entries after a while.
