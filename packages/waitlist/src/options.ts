@@ -4,6 +4,14 @@ import { normalizeDomain, normalizeEmail } from "./utils/email";
 
 const DEFAULT_INVITE_EXPIRES_IN = 60 * 60 * 24 * 7;
 const DEFAULT_CONFIRMATION_EXPIRES_IN = 60 * 60 * 24 * 2;
+const DEFAULT_SWEEP_INTERVAL = 60 * 60;
+const DAY = 86_400_000;
+
+function assertPositiveNumber(name: string, value: number | undefined) {
+  if (value !== undefined && !(Number.isFinite(value) && value > 0)) {
+    throw new Error(`[waitlist] "${name}" must be a positive number, got ${value}.`);
+  }
+}
 
 function assertNonNegativeNumber(name: string, value: number | undefined) {
   if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
@@ -19,6 +27,11 @@ export function resolveOptions(options: WaitlistOptions): ResolvedWaitlistOption
   if (options.confirmationExpiresIn === 0) {
     throw new Error("[waitlist] `confirmationExpiresIn` must be greater than 0.");
   }
+
+  const { rejected, registered, sweepInterval } = options.retention ?? {};
+  assertPositiveNumber("retention.rejected", rejected);
+  assertPositiveNumber("retention.registered", registered);
+  assertPositiveNumber("retention.sweepInterval", sweepInterval);
 
   const confirmEmail = options.confirmEmail ?? true;
   if (confirmEmail && !options.sendConfirmationEmail) {
@@ -49,6 +62,11 @@ export function resolveOptions(options: WaitlistOptions): ResolvedWaitlistOption
     sendConfirmationEmail: options.sendConfirmationEmail,
     confirmationExpiresIn:
       (options.confirmationExpiresIn ?? DEFAULT_CONFIRMATION_EXPIRES_IN) * 1000,
+    retention: {
+      rejected: rejected === undefined ? undefined : rejected * DAY,
+      registered: registered === undefined ? undefined : registered * DAY,
+    },
+    sweepInterval: (sweepInterval ?? DEFAULT_SWEEP_INTERVAL) * 1000,
     allowEmails,
     allowDomains,
     bypass: options.bypass ?? ((context) => context?.path === "/admin/create-user"),

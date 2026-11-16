@@ -44,6 +44,14 @@ export interface WaitlistEntry {
   inviteExpiresAt?: Date | null | undefined;
   /** JSON-encoded `metadata` from `/waitlist/join`. */
   metadata?: string | null | undefined;
+  /**
+   * When the person confirmed the email through the confirmation link
+   * (`confirmEmail`). `null` when nobody confirmed it: without
+   * `confirmEmail`, for emails an admin invited directly (`createInvite`)
+   * before they confirmed, and for entries confirmed before this field
+   * existed.
+   */
+  confirmedAt?: Date | null | undefined;
   /** Id of the admin who approved the entry. */
   approvedBy?: string | null | undefined;
   approvedAt?: Date | null | undefined;
@@ -93,6 +101,29 @@ export interface WaitlistConfirmation {
   expiresAt: Date;
 }
 
+/** How long entries that are no longer waiting are kept, and how often expired ones are deleted. */
+export interface WaitlistRetention {
+  /**
+   * Delete rejected entries this many days after they were rejected (or
+   * last changed). The email can then join again. Kept until an admin
+   * deletes them by default.
+   */
+  rejected?: number | undefined;
+  /**
+   * Delete registered entries this many days after the account was
+   * created. Kept until an admin deletes them by default.
+   */
+  registered?: number | undefined;
+  /**
+   * At most one cleanup per this many seconds, started in the background
+   * by a waitlist request. Also deletes unconfirmed entries whose link has
+   * expired, with or without `rejected` and `registered`. Defaults to
+   * `3600`. Call `auth.api.deleteExpiredWaitlistEntries` from a cron job
+   * instead, or as well.
+   */
+  sweepInterval?: number | undefined;
+}
+
 export interface WaitlistOptions {
   /**
    * Only let approved emails create an account. With `false`, the
@@ -136,6 +167,12 @@ export interface WaitlistOptions {
    * older than this are deleted. Defaults to 2 days.
    */
   confirmationExpiresIn?: number | undefined;
+  /**
+   * Delete rejected and registered entries after a number of days, and
+   * how often to clean up. Unconfirmed entries are always deleted once
+   * their link has expired. See {@link WaitlistRetention}.
+   */
+  retention?: WaitlistRetention | undefined;
   /**
    * Emails (`"ceo@acme.com"`) and domains (`"acme.com"`, including
    * subdomains) that may always create an account, waitlist or not.
@@ -193,6 +230,10 @@ export interface ResolvedWaitlistOptions {
   sendConfirmationEmail: WaitlistOptions["sendConfirmationEmail"];
   /** In milliseconds. */
   confirmationExpiresIn: number;
+  /** In milliseconds; `undefined` = kept. */
+  retention: { rejected: number | undefined; registered: number | undefined };
+  /** In milliseconds. */
+  sweepInterval: number;
   /** Lowercased exact addresses. */
   allowEmails: Set<string>;
   /** Lowercased domains, matched with their subdomains. */

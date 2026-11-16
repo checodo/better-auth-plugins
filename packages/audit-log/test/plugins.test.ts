@@ -3,7 +3,7 @@ import { referral } from "@checodo/better-auth-referral";
 import { waitlist } from "@checodo/better-auth-waitlist";
 import { admin, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuditEvent, AuditLogOptions } from "../src/index";
 import { auditLog, memoryStorage } from "../src/index";
 
@@ -150,6 +150,71 @@ describe("waitlist", () => {
     });
     // The invite code never reaches the log.
     expect(JSON.stringify(events("waitlist.approved"))).not.toContain("inviteCode");
+  });
+
+  it("records confirmations and people leaving, without an actor", async () => {
+    const storage = memoryStorage();
+    const tokens: string[] = [];
+    const { auth } = await getTestInstance(
+      {
+        plugins: [
+          waitlist({ sendConfirmationEmail: ({ token }) => void tokens.push(token) }),
+          auditLog({ storage }),
+        ],
+      },
+      { disableTestUser: true },
+    );
+    await auth.api.joinWaitlist({ body: { email: "ada@elsewhere.test" } });
+    const [token] = tokens as [string];
+    await auth.api.confirmWaitlistEmail({ body: { token } });
+    await auth.api.confirmWaitlistEmail({ body: { token } });
+    await auth.api.leaveWaitlist({ body: { token } });
+
+    const of = (type: string) => storage.events.filter((event) => event.type === type);
+    expect(of("waitlist.confirmed")).toEqual([
+      expect.objectContaining({
+        userId: null,
+        actorUserId: null,
+        severity: "low",
+        metadata: { entryId: expect.any(String), email: "ada@elsewhere.test" },
+      }),
+    ]);
+    expect(of("waitlist.left")).toEqual([
+      expect.objectContaining({
+        actorUserId: null,
+        severity: "low",
+        metadata: expect.objectContaining({ email: "ada@elsewhere.test", status: "pending" }),
+      }),
+    ]);
+  });
+
+  it("records leaving once when the link is opened twice at once", async () => {
+    const storage = memoryStorage();
+    const tokens: string[] = [];
+    const { auth } = await getTestInstance(
+      {
+        plugins: [
+          waitlist({ confirmEmail: false, onJoin: ({ token }) => void tokens.push(token) }),
+          auditLog({ storage }),
+        ],
+      },
+      { disableTestUser: true },
+    );
+    await auth.api.joinWaitlist({ body: { email: "ada@elsewhere.test" } });
+    const [token] = tokens as [string];
+    // Both requests find the entry before either deletes it.
+    const { adapter } = await auth.$context;
+    const deleteMany = adapter.deleteMany.bind(adapter);
+    vi.spyOn(adapter, "deleteMany").mockImplementation(async (data) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return deleteMany(data);
+    });
+    const answers = await Promise.all([
+      auth.api.leaveWaitlist({ body: { token } }),
+      auth.api.leaveWaitlist({ body: { token } }),
+    ]);
+    expect(answers).toEqual([{ success: true }, { success: true }]);
+    expect(storage.events.filter((event) => event.type === "waitlist.left")).toHaveLength(1);
   });
 
   it("records an automatic approval without an actor", async () => {

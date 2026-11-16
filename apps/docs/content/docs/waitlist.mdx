@@ -140,8 +140,14 @@ approved, and `onJoin` and `autoApprove` run after the confirmation.
   whether an email went out or not.
 - Opening the link several times, also at the same time, confirms the
   entry once: `onJoin` and `autoApprove` run once.
-- Unconfirmed entries whose link has expired are deleted the next time
-  someone joins, so emails nobody confirmed aren't kept.
+- The entry's `confirmedAt` records when the link was opened. It stays
+  `null` when nobody confirmed the email: without double opt-in, for
+  emails an admin invited directly before they confirmed, and for entries
+  confirmed before the field existed.
+  With the [audit log](/docs/audit-log), the confirmation is also
+  recorded there as `waitlist.confirmed`.
+- Unconfirmed entries whose link has expired are deleted, so emails
+  nobody confirmed aren't kept (see [Privacy](#privacy)).
 - An admin can still invite an unconfirmed email directly (see
   [Managing the waitlist](#managing-the-waitlist)), for example someone who
   asked in person. That is the admin's call.
@@ -373,14 +379,58 @@ may fail; the place stays free for the next try.
   A waitlist stores email addresses, which is personal data. Keep double
   opt-in on, so you can show that every person asked to be contacted;
   mention the waitlist in your privacy policy; and put the leave link in
-  your emails, so people can withdraw and have their entry deleted.
+  your emails, so people can leave the waitlist and have their entry
+  deleted.
 </Callout>
 
-Unconfirmed entries are deleted once their link has expired, the next time
-someone joins. All other entries,
-including rejected and registered ones, stay until someone leaves or an
-admin deletes them: delete what you no longer need, for example rejected
-entries after a while.
+**Consent.** A confirmed entry shows that someone controlled the email
+address and opened the link, and `confirmedAt` says when. It doesn't
+record what they agreed to. If consent is your legal basis, also keep the
+consent statement or notice version they saw: pass it as `metadata` when
+they join, and it is stored with the entry:
+
+```ts
+await authClient.waitlist.join({
+  email: "ada@example.com",
+  metadata: { consent: "waitlist-emails", noticeVersion: "2026-11" },
+});
+```
+
+With the [audit log](/docs/audit-log), confirmations (`waitlist.confirmed`)
+and people leaving (`waitlist.left`) are recorded there too, so the
+record of a withdrawal remains after the entry is deleted. These events
+hold the email address, so they stay personal data until the audit
+log's [retention](/docs/audit-log#retention) deletes them.
+
+**Cleanup.** Unconfirmed entries whose link has expired are deleted, and
+with `retention`, rejected and registered entries after a number of days:
+
+```ts title="auth.ts"
+waitlist({
+  // ...
+  retention: { rejected: 90, registered: 30 }, // days
+});
+```
+
+- Rejected entries are deleted `rejected` days after they were rejected.
+  The email can then join again.
+- Registered entries are deleted `registered` days after the account was
+  created. The user keeps their account.
+- Pending and approved entries are never deleted automatically: those
+  people are still waiting.
+
+The cleanup runs in the background, at most once an hour
+(`retention.sweepInterval`, in seconds), started by any waitlist request.
+Joining also deletes expired unconfirmed entries right away. On serverless platforms, configure
+better-auth's `advanced.backgroundTasks` so it can finish, or run it from a
+cron job with the server-only `deleteExpiredWaitlistEntries`:
+
+```ts title="cron.ts"
+const { deleted } = await auth.api.deleteExpiredWaitlistEntries();
+```
+
+Without `retention`, rejected and registered entries stay until someone
+leaves or an admin deletes them.
 
 ## Managing the waitlist
 
@@ -441,10 +491,12 @@ const { data: stats } = await authClient.waitlist.getStats();
 | `POST /waitlist/reject-entry`    | `authClient.waitlist.rejectEntry`    | `auth.api.rejectWaitlistEntry`    |
 | `POST /waitlist/delete-entry`    | `authClient.waitlist.deleteEntry`    | `auth.api.deleteWaitlistEntry`    |
 | `POST /waitlist/create-invite`   | `authClient.waitlist.createInvite`   | `auth.api.createWaitlistInvite`   |
+| (server only)                    | -                                    | `auth.api.deleteExpiredWaitlistEntries` |
 
 <Callout title="With the audit log">
-  With the [audit log](/docs/audit-log) plugin, approvals, rejections, and deleted entries are recorded there
-  too (see [Events from other plugins](/docs/audit-log#events-from-other-plugins)).
+  With the [audit log](/docs/audit-log) plugin, confirmations, approvals,
+  rejections, deleted entries, and people leaving are recorded there too
+  (see [Events from other plugins](/docs/audit-log#events-from-other-plugins)).
 </Callout>
 
 ## Schema
@@ -480,6 +532,11 @@ Table: `waitlistEntry`
     },
     inviteExpiresAt: { type: "Date", description: "When the invite expires." },
     metadata: { type: "string", description: "JSON-encoded `metadata` from the join request." },
+    confirmedAt: {
+      type: "Date",
+      description:
+        "When the email was confirmed through the link. `null` without double opt-in, for emails invited directly before they confirmed, and for entries confirmed before this field existed.",
+    },
     approvedBy: { type: "string", description: "Id of the admin who approved the entry." },
     approvedAt: { type: "Date", description: "When the entry was last approved." },
     registeredAt: { type: "Date", description: "When the account was created." },
@@ -557,6 +614,11 @@ if (error?.code === WAITLIST_ERROR_CODES.EMAIL_NOT_APPROVED.code) {
       default: "172800",
       description:
         "How long a confirmation link works, in seconds (2 days). Unconfirmed entries older than this are deleted.",
+    },
+    retention: {
+      type: "{ rejected?: number; registered?: number; sweepInterval?: number }",
+      description:
+        "Delete rejected and registered entries after this many days (kept by default), and clean up at most once per `sweepInterval` seconds (`3600`). See [Privacy](#privacy).",
     },
     autoApprove: {
       type: "boolean | (email: string) => boolean | Promise<boolean>",

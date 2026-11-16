@@ -38,6 +38,15 @@ describe("options", () => {
     expect(() => resolveOptions({ ...base, inviteExpiresIn: -1 })).toThrow(/inviteExpiresIn/);
     expect(() => resolveOptions({ ...base, maxEntries: Number.NaN })).toThrow(/maxEntries/);
     expect(() => resolveOptions({ ...base, allow: [" "] })).toThrow(/allow/);
+    expect(() => resolveOptions({ ...base, retention: { rejected: 0 } })).toThrow(
+      /retention\.rejected/,
+    );
+    expect(() => resolveOptions({ ...base, retention: { registered: -1 } })).toThrow(
+      /retention\.registered/,
+    );
+    expect(() => resolveOptions({ ...base, retention: { sweepInterval: Number.NaN } })).toThrow(
+      /retention\.sweepInterval/,
+    );
     expect(() => resolveOptions({ ...base, confirmationExpiresIn: 0 })).toThrow(
       /confirmationExpiresIn/,
     );

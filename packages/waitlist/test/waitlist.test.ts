@@ -91,6 +91,7 @@ async function setup(options: WaitlistOptions = {}, extraPlugins: BetterAuthPlug
       tokenHash: string;
       inviteCodeHash: string | null;
       confirmationsSent: number;
+      confirmedAt: Date | null;
     }>({
       model: "waitlistEntry",
       where: [{ field: "email", value: email }],
@@ -249,6 +250,11 @@ describe("join", () => {
     expect(stats.pending).toBeLessThanOrEqual(1);
     // The others stay unconfirmed, so they can confirm once there's room.
     expect(stats.unconfirmed).toBe(3 - stats.pending);
+    const { entries } = await auth.api.listWaitlistEntries({
+      query: { status: "unconfirmed" },
+      headers: adminHeaders,
+    });
+    expect(entries.map((entry) => entry.confirmedAt ?? null)).toEqual(entries.map(() => null));
   });
 
   it("auto-approves with a function", async () => {
@@ -304,6 +310,45 @@ describe("double opt-in", () => {
     // Opening the link again changes nothing.
     await auth.api.confirmWaitlistEmail({ body: { token } });
     expect(onJoin).toHaveBeenCalledOnce();
+  });
+
+  it("records when the email was confirmed, once", async () => {
+    const { auth, join, entryFor, confirmations } = await setup({ confirmEmail: true });
+    await join("ada@example.com");
+    expect((await entryFor("ada@example.com"))?.confirmedAt ?? null).toBeNull();
+
+    const before = Date.now();
+    const { token } = present(confirmations[0], "confirmation");
+    await auth.api.confirmWaitlistEmail({ body: { token } });
+    const confirmedAt = present((await entryFor("ada@example.com"))?.confirmedAt, "confirmedAt");
+    expect(new Date(confirmedAt).getTime()).toBeGreaterThanOrEqual(before - 1000);
+    expect(new Date(confirmedAt).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+
+    // Opening the link again keeps the first time.
+    vi.useFakeTimers({ now: Date.now() + 61_000, toFake: ["Date"] });
+    try {
+      await auth.api.confirmWaitlistEmail({ body: { token } });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect((await entryFor("ada@example.com"))?.confirmedAt).toEqual(confirmedAt);
+  });
+
+  it("leaves confirmedAt empty when nobody confirmed the email", async () => {
+    const withoutOptIn = await setup();
+    await withoutOptIn.join("ada@example.com");
+    expect((await withoutOptIn.entryFor("ada@example.com"))?.confirmedAt ?? null).toBeNull();
+
+    // Invited directly, whether the email had joined (unconfirmed) or not.
+    const { auth, join, adminHeaders } = await setup({ confirmEmail: true });
+    await join("bob@example.com");
+    for (const email of ["bob@example.com", "carol@example.com"]) {
+      const { entry } = await auth.api.createWaitlistInvite({
+        body: { email },
+        headers: adminHeaders,
+      });
+      expect(entry.confirmedAt ?? null).toBeNull();
+    }
   });
 
   it("rejects unknown and expired tokens", async () => {
@@ -982,6 +1027,7 @@ describe("concurrent requests", () => {
     expect(answers).toEqual(Array.from({ length: 5 }, () => ({ success: true })));
     expect(onJoin).toHaveBeenCalledOnce();
     expect(invites).toHaveLength(1);
+    expect((await storedFor("ada@example.com")).confirmedAt).not.toBeNull();
     // The invite code sent is the one stored.
     const stored = await storedFor("ada@example.com");
     expect(stored.inviteCodeHash).toBe(await sha256(present(invites[0], "invite").inviteCode));
@@ -1030,6 +1076,94 @@ describe("concurrent requests", () => {
     const entry = present(await entryFor("ada@example.com"), "entry");
     expect(entry.status).toBe(rejected ? "rejected" : "approved");
     expect(invites).toHaveLength(approvedCount);
+  });
+});
+
+describe("cleanup", () => {
+  const DAY = 86_400_000;
+
+  /** Runs `fn` with `Date` moved `ms` into the future. */
+  async function later<T>(ms: number, fn: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ now: Date.now() + ms, toFake: ["Date"] });
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("deletes expired unconfirmed entries on other waitlist requests, without a join", async () => {
+    const { auth, join, entryFor, adminHeaders } = await setup({
+      confirmEmail: true,
+      confirmationExpiresIn: 60,
+      retention: { sweepInterval: 30 },
+    });
+    await join("ada@example.com");
+    await later(61_000, async () => {
+      await auth.api.getWaitlistStats({ headers: adminHeaders });
+      // The cleanup runs in the background.
+      await vi.waitFor(async () => expect(await entryFor("ada@example.com")).toBeUndefined());
+    });
+  });
+
+  it("cleans up at most once per sweepInterval", async () => {
+    const { auth, context, join, adminHeaders } = await setup();
+    const deleteMany = vi.spyOn(context.adapter, "deleteMany");
+    const stats = () => auth.api.getWaitlistStats({ headers: adminHeaders });
+    await join("ada@example.com");
+    await stats();
+    await stats();
+    // `setup`'s admin requests may have swept already; none since.
+    const calls = deleteMany.mock.calls.length;
+    expect(calls).toBeLessThanOrEqual(1);
+    await later(3601_000, stats);
+    await vi.waitFor(() => expect(deleteMany.mock.calls.length).toBe(calls + 1));
+  });
+
+  it("deletes rejected and registered entries after their retention", async () => {
+    const { auth, join, approve, signUp, entryFor, adminHeaders } = await setup({
+      retention: { rejected: 30, registered: 10 },
+    });
+    for (const name of ["ada", "bob", "carol"]) await join(`${name}@example.com`);
+    const ada = present(await entryFor("ada@example.com"), "entry");
+    await auth.api.rejectWaitlistEntry({ body: { id: ada.id }, headers: adminHeaders });
+    await approve("bob@example.com");
+    await signUp("bob@example.com");
+
+    const cleanUp = () => auth.api.deleteExpiredWaitlistEntries();
+    await expect(cleanUp()).resolves.toEqual({ deleted: 0 });
+    await expect(later(11 * DAY, cleanUp)).resolves.toEqual({ deleted: 1 });
+    expect(await entryFor("bob@example.com")).toBeUndefined();
+    await expect(later(31 * DAY, cleanUp)).resolves.toEqual({ deleted: 1 });
+    expect(await entryFor("ada@example.com")).toBeUndefined();
+    // Still waiting: never deleted.
+    expect((await entryFor("carol@example.com"))?.status).toBe("pending");
+  });
+
+  it("keeps rejected and registered entries without retention", async () => {
+    const { auth, join, approve, signUp, entryFor, adminHeaders } = await setup();
+    await join("ada@example.com");
+    await join("bob@example.com");
+    const ada = present(await entryFor("ada@example.com"), "entry");
+    await auth.api.rejectWaitlistEntry({ body: { id: ada.id }, headers: adminHeaders });
+    await approve("bob@example.com");
+    await signUp("bob@example.com");
+    await expect(later(1000 * DAY, () => auth.api.deleteExpiredWaitlistEntries())).resolves.toEqual(
+      { deleted: 0 },
+    );
+    expect((await entryFor("ada@example.com"))?.status).toBe("rejected");
+    expect((await entryFor("bob@example.com"))?.status).toBe("registered");
+  });
+
+  it("counts the expired unconfirmed entries a cron call deletes", async () => {
+    const { auth, join, entryFor } = await setup({ confirmEmail: true, confirmationExpiresIn: 60 });
+    await join("ada@example.com");
+    await join("bob@example.com");
+    await expect(auth.api.deleteExpiredWaitlistEntries()).resolves.toEqual({ deleted: 0 });
+    await expect(later(61_000, () => auth.api.deleteExpiredWaitlistEntries())).resolves.toEqual({
+      deleted: 2,
+    });
+    expect(await entryFor("ada@example.com")).toBeUndefined();
   });
 });
 
