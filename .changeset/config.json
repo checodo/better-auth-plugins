@@ -6,6 +6,7 @@
   "linked": [],
   "access": "public",
   "baseBranch": "main",
+  "changedFilePatterns": ["**", "!test/**"],
   "updateInternalDependencies": "patch",
   "privatePackages": {
     "version": false,
