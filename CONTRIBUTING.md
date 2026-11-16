@@ -393,9 +393,11 @@ Trunk-based development: `main` plus short-lived feature branches.
 ### Branch protection (GitHub settings, once CI is on)
 
 - Require a pull request before merging; allow **squash merge only**.
-- Require the `CI / ci` status check to pass. Not `CI / changeset`: the
-  "Version Packages" pull request removes the changesets and would fail
-  it.
+- Require the `CI / ci`, `CI / database (postgres)`, and
+  `CI / database (mysql)` status checks to pass. The `database` checks
+  can only be selected once the job has run, for example on the pull
+  request that adds them. Not `CI / changeset`: the "Version Packages"
+  pull request removes the changesets and would fail it.
 - Require branches to be up to date before merging.
 - Block force pushes and deletion of `main`.
 - If you work alone, skip the required-review rule but keep the checks.
