@@ -186,9 +186,18 @@ With the `password` option set, a built-in **context check** also blocks
 passwords that contain the user's email address (its local part, without
 a `+tag`), username, or the app name (`appName`, when you set one), each
 whole and split into words, ignoring words shorter than 4 characters.
-`jane.doe@example.com` can't use `JaneDoe2024` or `doe-r4y-jane`. NIST
-SP 800-63B asks for this ("context-specific words"). Turn it off with
-`checkContext: false`.
+`jane.doe@example.com` can't use `JaneDoe2024` or `doe-r4y-jane`. Turn it
+off with `checkContext: false`.
+
+<Callout title="NIST SP 800-63B-4">
+  NIST's password blocklist (§3.1.1.2) compares the **entire** password
+  against commonly used, expected, and compromised passwords, including
+  context-specific words such as the service name and the username. Use
+  `exact` rules (the default) for that list. The context check and
+  `prefix`, `suffix`, `contains`, and `regex` rules compare parts of a
+  password: they are stricter policies of your own, not the comparison
+  NIST requires. See [Compliance](/docs/compliance#blocklist).
+</Callout>
 
 A password is checked when better-auth hashes it, so after its own
 length checks and after a reset token or OTP is verified: the rules

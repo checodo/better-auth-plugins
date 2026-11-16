@@ -128,3 +128,6 @@ see [SECURITY.md](./SECURITY.md).
 ## License
 
 [MIT](./LICENSE.md). Each package ships the same license file.
+
+The plugins are provided as is, without warranty (see the license). Test
+them in your own application like any other dependency.
