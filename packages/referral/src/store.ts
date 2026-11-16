@@ -1,6 +1,6 @@
 import type { AuthContext } from "@better-auth/core";
 import type { Where } from "@better-auth/core/db/adapter";
-import type { Referral, ReferralCode, ReferralStatus, ReferralStep } from "./types";
+import type { Referral, ReferralCode, ReferralSlot, ReferralStatus, ReferralStep } from "./types";
 
 /** The adapter methods used here; satisfied by the base adapter and a transaction adapter. */
 export type Adapter = Pick<
@@ -80,33 +80,50 @@ export async function deleteReferral(adapter: Adapter, id: string): Promise<void
   await adapter.delete({ model: "referral", where: [{ field: "id", value: id }] });
 }
 
-/**
- * Number of the referrer's referrals made before `referral`: earlier ones,
- * and those made in the same millisecond with a smaller id. Gives every
- * referral of a referrer a fixed place, so concurrent sign-ups agree on
- * which of them are over `maxReferralsPerUser`.
- */
-export async function countReferralsBefore(
+// ----- places (`maxReferralsPerUser`) -----
+
+export function slotKey(referrerUserId: string, place: number): string {
+  return `${referrerUserId}:${place}`;
+}
+
+export async function countSlots(adapter: Adapter, referrerUserId: string): Promise<number> {
+  return adapter.count({
+    model: "referralSlot",
+    where: [{ field: "referrerUserId", value: referrerUserId }],
+  });
+}
+
+/** The keys of the referrer's places below `limit`, the ones that can still be taken. */
+export async function takenSlotKeys(
   adapter: Adapter,
-  referral: Pick<Referral, "id" | "referrerUserId" | "createdAt">,
-): Promise<number> {
-  const createdAt = new Date(referral.createdAt);
-  const referrer = { field: "referrerUserId", value: referral.referrerUserId } satisfies Where;
-  const [earlier, sameTime] = await Promise.all([
-    adapter.count({
-      model: "referral",
-      where: [referrer, { field: "createdAt", value: createdAt, operator: "lt" }],
-    }),
-    adapter.count({
-      model: "referral",
-      where: [
-        referrer,
-        { field: "createdAt", value: createdAt },
-        { field: "id", value: referral.id, operator: "lt" },
-      ],
-    }),
-  ]);
-  return earlier + sameTime;
+  referrerUserId: string,
+  limit: number,
+): Promise<Set<string>> {
+  const keys = Array.from({ length: limit }, (_, place) => slotKey(referrerUserId, place));
+  const slots = await adapter.findMany<ReferralSlot>({
+    model: "referralSlot",
+    where: [{ field: "key", value: keys, operator: "in" }],
+    limit,
+  });
+  return new Set(slots.map((slot) => slot.key));
+}
+
+/** Takes the place `key` for `referralId`. Throws if it is taken (unique index). */
+export async function createSlot(
+  adapter: Adapter,
+  input: Pick<ReferralSlot, "referrerUserId" | "referralId" | "key">,
+): Promise<ReferralSlot> {
+  return adapter.create<Omit<ReferralSlot, "id">, ReferralSlot>({
+    model: "referralSlot",
+    data: { ...input, createdAt: new Date() },
+  });
+}
+
+export async function findSlotByKey(adapter: Adapter, key: string): Promise<ReferralSlot | null> {
+  return adapter.findOne<ReferralSlot>({
+    model: "referralSlot",
+    where: [{ field: "key", value: key }],
+  });
 }
 
 /**

@@ -31,6 +31,17 @@ export interface Referral {
   createdAt: Date;
 }
 
+/** A place of `maxReferralsPerUser`, as stored in the `referralSlot` table. */
+export interface ReferralSlot {
+  id: string;
+  referrerUserId: string;
+  /** The referral holding the place. Unique. */
+  referralId: string;
+  /** `<referrerUserId>:<n>`. Unique. */
+  key: string;
+  createdAt: Date;
+}
+
 /** A completed step of a referral, as stored in the `referralStep` table. */
 export interface ReferralStep {
   id: string;
@@ -104,8 +115,11 @@ export interface ReferralOptions {
     | ((details: { referral: Referral; step: string }) => void | Promise<void>)
     | undefined;
   /**
-   * Called once per referral, when every required step is done: grant
-   * rewards here. Errors are logged.
+   * Called when every required step of a referral is done: grant rewards
+   * here. Called at most once per referral, right after it is saved as
+   * `completed`. Errors are logged, not retried, so make the reward
+   * idempotent on `referral.id` and reconcile against the completed
+   * referrals (`listAllReferrals`) if a reward must never be missed.
    */
   onReferralCompleted?: ((referral: Referral) => void | Promise<void>) | undefined;
   /**

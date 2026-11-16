@@ -56,6 +56,24 @@ describe("parseIp / canonicalIp", () => {
     }
   });
 
+  it("accepts an embedded IPv4 address only at the end of the address", () => {
+    for (const value of [
+      "192.0.2.1::",
+      "1:2:192.0.2.1::",
+      "1:192.0.2.1::5",
+      "::192.0.2.1:1",
+      "1:2:3:4:5:192.0.2.1:7",
+      "1:2:3:4:5:6:7:192.0.2.1",
+      "::1.2.3",
+    ]) {
+      expect(parseIp(value), value).toBeNull();
+    }
+    expect(canonicalIp("::192.0.2.1")).toBe("::c000:201");
+    expect(canonicalIp("1:2:3:4:5:6:192.0.2.1")).toBe("1:2:3:4:5:6:c000:201");
+    expect(canonicalIp("64:ff9b::192.0.2.1")).toBe("64:ff9b::c000:201");
+    expect(canonicalIp("::ffff:192.0.2.1")).toBe("192.0.2.1");
+  });
+
   it("round-trips through formatIp", () => {
     const bytes = parseIp("2001:db8::abcd") as Uint8Array;
     expect(formatIp(bytes)).toBe("2001:db8::abcd");

@@ -6,7 +6,26 @@ import { blocklist } from "../src/index";
 
 const GOOD_PASSWORD = "correct horse battery staple";
 
-async function setup(options: BlocklistOptions = {}, extra: { appName?: string } = {}) {
+interface AuditEvent {
+  type: string;
+  errorCode?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+/** Stands in for `@checodo/better-auth-audit-log`, found through `getPlugin("audit-log")`. */
+function fakeAuditLog(events: AuditEvent[]) {
+  return {
+    id: "audit-log",
+    recordEvent: async (event: AuditEvent) => {
+      events.push(event);
+    },
+  } as const;
+}
+
+async function setup(
+  options: BlocklistOptions = {},
+  { auditLog, ...extra }: { appName?: string; auditLog?: AuditEvent[] } = {},
+) {
   const resetTokens: string[] = [];
   const magicLinks: string[] = [];
   const instance = await getTestInstance(
@@ -28,6 +47,7 @@ async function setup(options: BlocklistOptions = {}, extra: { appName?: string }
           },
         }),
         testUtils(),
+        ...(auditLog ? [fakeAuditLog(auditLog)] : []),
       ],
     },
     { disableTestUser: true },
@@ -74,14 +94,63 @@ describe("password rules", () => {
     await expect(signUp("d@example.com", GOOD_PASSWORD)).resolves.toBeTruthy();
   });
 
-  it("never pass the password to onBlocked", async () => {
+  it("never pass the password to onBlocked, not even as the rule's value", async () => {
     const onBlocked = vi.fn();
     const { signUp } = await setup({ password: { values: ["password123"] }, onBlocked });
     await expectBlocked(signUp("a@example.com", "password123"), "PASSWORD_NOT_ALLOWED");
     expect(onBlocked).toHaveBeenCalledWith({
       target: "password",
       value: "[redacted]",
-      rule: { value: "password123", type: "exact" },
+      rule: { value: "[redacted]", type: "exact" },
+    });
+  });
+
+  it("never pass the password or part of it to onBlocked or the audit log", async () => {
+    const onBlocked = vi.fn();
+    const auditEvents: AuditEvent[] = [];
+    const { signUp } = await setup(
+      {
+        password: {
+          values: [
+            "password123",
+            { value: "hunter", type: "contains", reason: "Common word" },
+            { value: "^letmein\\d+$", type: "regex" },
+          ],
+        },
+        onBlocked,
+      },
+      { auditLog: auditEvents },
+    );
+    const attempts = ["password123", "Hunter-and-more", "letmein2024", "P@ssw0rd123"];
+    for (const password of attempts) {
+      await expectBlocked(signUp("a@example.com", password), "PASSWORD_NOT_ALLOWED");
+    }
+
+    const reported = JSON.stringify([onBlocked.mock.calls, auditEvents]).toLowerCase();
+    for (const secret of ["password123", "hunter", "letmein", "p@ssw0rd"]) {
+      expect(reported).not.toContain(secret);
+    }
+    expect(onBlocked).toHaveBeenCalledWith({
+      target: "password",
+      value: "[redacted]",
+      rule: { value: "[redacted]", type: "contains", reason: "Common word" },
+    });
+    expect(auditEvents).toHaveLength(attempts.length);
+    expect(auditEvents[0]).toMatchObject({
+      type: "blocklist.blocked",
+      errorCode: "PASSWORD_NOT_ALLOWED",
+      metadata: { target: "password", value: "[redacted]", rule: { value: "[redacted]" } },
+    });
+  });
+
+  it("keep the value and rule of other targets in onBlocked", async () => {
+    const onBlocked = vi.fn();
+    const { signUp } = await setup({ email: { values: ["eve@example.com"] }, onBlocked });
+    await expectBlocked(signUp("eve@example.com", GOOD_PASSWORD), "EMAIL_NOT_ALLOWED");
+    expect(onBlocked).toHaveBeenCalledWith({
+      target: "email",
+      value: "eve@example.com",
+      rule: { value: "eve@example.com", type: "exact" },
     });
   });
 
@@ -222,6 +291,22 @@ describe("password context check", () => {
     );
   });
 
+  it("checks /set-password for a user without a password", async () => {
+    const { auth, createUser } = await setup({ password: { values: ["password123"] } });
+    const { headers } = await createUser("jane@example.com");
+    await expectBlocked(
+      auth.api.setPassword({ body: { newPassword: "password123" }, headers }),
+      "PASSWORD_NOT_ALLOWED",
+    );
+    await expectBlocked(
+      auth.api.setPassword({ body: { newPassword: "jane-is-great-2024" }, headers }),
+      "PASSWORD_CONTAINS_CONTEXT_WORD",
+    );
+    await expect(
+      auth.api.setPassword({ body: { newPassword: GOOD_PASSWORD }, headers }),
+    ).resolves.toEqual({ status: true });
+  });
+
   it("checks /admin/create-user", async () => {
     const { auth, createUser } = await setup({ password: {} });
     const { headers } = await createUser("root@example.com", "admin");
@@ -331,6 +416,29 @@ describe("ip rules", () => {
         headers: from("203.0.113.7", { "cf-ipcountry": "DE" }),
       }),
     ).resolves.toBeTruthy();
+  });
+
+  it("treat an error from getCountry as an unknown country, and log it", async () => {
+    const { auth, signUp } = await setup({
+      ip: {
+        values: ["203.0.113.7"],
+        countries: ["KP"],
+        getCountry: () => {
+          throw new Error("geo lookup failed");
+        },
+      },
+    });
+    const { logger } = await auth.$context;
+    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
+    await expect(
+      signUp("a@example.com", GOOD_PASSWORD, { headers: from("198.51.100.1") }),
+    ).resolves.toBeTruthy();
+    await expectBlocked(
+      signUp("b@example.com", GOOD_PASSWORD, { headers: from("203.0.113.7") }),
+      "IP_ADDRESS_NOT_ALLOWED",
+      403,
+    );
+    expect(error).toHaveBeenCalledWith("[blocklist] getCountry threw an error", expect.any(Error));
   });
 
   it("only apply in their scope", async () => {

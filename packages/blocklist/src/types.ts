@@ -183,8 +183,10 @@ export interface BlocklistOptions {
   /**
    * Called whenever a value is blocked, before the request fails. Errors
    * thrown here are logged and don't change the response. For passwords,
-   * `value` is always `"[redacted]"`; for a `country` rule it is the
-   * country code, for other `ip` rules the IP address.
+   * `value` and `rule.value` are always `"[redacted]"` (a rule's value
+   * could be the password itself), except for the context check, whose
+   * `rule.value` names the source (`"[email]"`). For a `country` rule
+   * `value` is the country code, for other `ip` rules the IP address.
    */
   onBlocked?:
     | ((details: {

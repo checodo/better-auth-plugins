@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { referralClient } from "../src/client";
 import type { Referral, ReferralOptions } from "../src/index";
 import { referral } from "../src/index";
+import { claimReferralPlace } from "../src/referrals";
 import { CODE_ALPHABET } from "../src/utils/code";
 
 const PASSWORD = "password1234";
@@ -237,7 +238,8 @@ describe("attribution", () => {
 
   it("holds maxReferralsPerUser when sign-ups race for the last place", async () => {
     // Another sign-up with the same code is recorded after this one passed
-    // the code check (both saw a free place); the earlier one keeps it.
+    // the code check (both saw a free place). Its referral, not settled
+    // yet, takes up the place, so this one doesn't get it.
     let race: (() => Promise<void>) | undefined;
     const onReferral = vi.fn();
     const { context, referrer, signUp, referralOf, createUser } = await setup({
@@ -269,6 +271,67 @@ describe("attribution", () => {
     expect(await referralOf(bob.user.id)).toBeNull();
     expect(await referralOf(carol.user.id)).not.toBeNull();
     expect(onReferral).not.toHaveBeenCalled();
+  });
+
+  it("holds maxReferralsPerUser when transactions commit out of order", async () => {
+    // Two sign-ups: the earlier one's transaction commits after the later
+    // one has settled. Counting the referrals made earlier kept both.
+    const { context, referrer, createUser } = await setup({ maxReferralsPerUser: 1 });
+    const ada = await referrer();
+    const make = async (email: string, createdAt: Date) => {
+      const { user } = await createUser(email);
+      return context.adapter.create<Omit<Referral, "id">, Referral>({
+        model: "referral",
+        data: {
+          referrerUserId: ada.user.id,
+          referredUserId: user.id,
+          code: ada.code,
+          status: "pending",
+          completedAt: null,
+          createdAt,
+        },
+      });
+    };
+    const started = new Date(Date.now() - 1000);
+    const later = await make("carol@example.com", new Date());
+    expect(await claimReferralPlace(context.adapter, 1, later)).toBe(true);
+    // The earlier sign-up's row only becomes visible now.
+    const earlier = await make("bob@example.com", started);
+    expect(await claimReferralPlace(context.adapter, 1, earlier)).toBe(false);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBe(1);
+  });
+
+  it("gives exactly maxReferralsPerUser places to referrals settling at once", async () => {
+    const { context, referrer, createUser } = await setup({ maxReferralsPerUser: 2 });
+    const ada = await referrer();
+    const referrals: Referral[] = [];
+    for (const name of ["bob", "carol", "dan", "eve", "fay"]) {
+      const { user } = await createUser(`${name}@example.com`);
+      referrals.push(
+        await context.adapter.create<Omit<Referral, "id">, Referral>({
+          model: "referral",
+          data: {
+            referrerUserId: ada.user.id,
+            referredUserId: user.id,
+            code: ada.code,
+            status: "pending",
+            completedAt: null,
+            createdAt: new Date(),
+          },
+        }),
+      );
+    }
+    // Each settles as if the others were not visible yet: the only thing
+    // keeping them apart is the unique key of the place.
+    const claim = (one: Referral) =>
+      claimReferralPlace(
+        { ...context.adapter, count: async ({ model }) => (model === "referral" ? 1 : 0) },
+        2,
+        one,
+      );
+    const kept = await Promise.all(referrals.map(claim));
+    expect(kept.filter(Boolean)).toHaveLength(2);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBe(2);
   });
 
   it("counts maxReferralsPerUser across codes: a new code doesn't reset it", async () => {

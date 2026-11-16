@@ -7,14 +7,19 @@ import type { Adapter } from "./store";
 import {
   completeReferral,
   countReferrals,
+  countSlots,
   createCode,
+  createSlot,
   createStep,
   findCodeByCode,
   findCodeByUserId,
+  findSlotByKey,
   findStep,
   isReferrerBlocked,
   replaceCode,
+  slotKey,
   stepsByReferral,
+  takenSlotKeys,
 } from "./store";
 import type { Referral, ReferralCode, ResolvedReferralOptions } from "./types";
 import { generateCode, isWellFormedCode, normalizeCode } from "./utils/code";
@@ -115,6 +120,50 @@ export async function findUsableCode(
   return stored;
 }
 
+/**
+ * Takes one of the referrer's `max` places for `referral`, once its
+ * sign-up is committed. Returns `false` when they are all taken; the
+ * caller then deletes the referral.
+ *
+ * A place is a row with a unique key (`referralSlot`), so two sign-ups
+ * can't take the same one, whatever order their transactions commit in.
+ * Referrals without a place (made before `maxReferralsPerUser` was set or
+ * before this version, or another sign-up's that isn't settled yet) take
+ * up places too, so the limit also holds for referrers who already have
+ * referrals. When sign-ups race for the last place, the first to settle
+ * gets it; at worst all of them lose it, and the place stays free for the
+ * next sign-up.
+ */
+export async function claimReferralPlace(
+  adapter: Adapter,
+  max: number,
+  referral: Pick<Referral, "id" | "referrerUserId">,
+): Promise<boolean> {
+  const { referrerUserId } = referral;
+  // Places first, then referrals: a referral that takes a place in
+  // between counts as one without a place, which only frees fewer places.
+  const slots = await countSlots(adapter, referrerUserId);
+  const referrals = await countReferrals(adapter, { referrerUserId });
+  const withoutPlace = Math.max(0, referrals - slots - 1);
+  const places = max - withoutPlace;
+  if (places <= 0) return false;
+
+  const taken = await takenSlotKeys(adapter, referrerUserId, places);
+  for (let place = 0; place < places; place++) {
+    const key = slotKey(referrerUserId, place);
+    if (taken.has(key)) continue;
+    try {
+      await createSlot(adapter, { referrerUserId, referralId: referral.id, key });
+      return true;
+    } catch (error) {
+      // Taken by a concurrent sign-up since it was read: try the next one.
+      if (await findSlotByKey(adapter, key)) continue;
+      throw error;
+    }
+  }
+  return false;
+}
+
 /** Records a completed referral in the audit log, for the referrer it rewards. */
 function recordCompleted(referral: Referral): Promise<void> {
   return recordAuditEvent({
@@ -126,8 +175,9 @@ function recordCompleted(referral: Referral): Promise<void> {
 }
 
 /**
- * Marks `referral` completed once all required steps are done, and runs
- * `onReferralCompleted` exactly once.
+ * Marks `referral` completed once all required steps are done. Only the
+ * request whose conditional update completes it runs `onReferralCompleted`,
+ * so it runs at most once; an error in it is logged, not retried.
  */
 async function completeIfDone(
   adapter: Adapter,

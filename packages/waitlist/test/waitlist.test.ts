@@ -89,6 +89,7 @@ async function setup(options: WaitlistOptions = {}, extraPlugins: BetterAuthPlug
     const entry = await context.adapter.findOne<{
       tokenHash: string;
       inviteCodeHash: string | null;
+      confirmationsSent: number;
     }>({
       model: "waitlistEntry",
       where: [{ field: "email", value: email }],
@@ -907,6 +908,115 @@ describe("admin endpoints", () => {
     expect(entry).toMatchObject({ email: "guest@example.com", status: "approved" });
     expect(invites.map((invite) => invite.email)).toEqual(["guest@example.com"]);
     await expect(signUp("guest@example.com")).resolves.toBeTruthy();
+  });
+});
+
+describe("concurrent requests", () => {
+  it("resend the confirmation link once when the same email joins again at once", async () => {
+    const { auth, join, confirmations, storedFor } = await setup({ confirmEmail: true });
+    await join("ada@example.com");
+    vi.useFakeTimers({ now: Date.now() + 6 * 60_000, toFake: ["Date"] });
+    try {
+      const answers = await Promise.all(Array.from({ length: 5 }, () => join("ada@example.com")));
+      expect(answers).toEqual(Array.from({ length: 5 }, () => ({ success: true })));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(confirmations).toHaveLength(2);
+    const stored = await storedFor("ada@example.com");
+    expect(stored.confirmationsSent).toBe(2);
+    // The one link sent is the one that works.
+    const sent = present(confirmations[1], "resent confirmation");
+    expect(stored.tokenHash).toBe(await sha256(sent.token));
+    await expect(auth.api.confirmWaitlistEmail({ body: { token: sent.token } })).resolves.toEqual({
+      success: true,
+    });
+  });
+
+  it("never send more than 4 confirmation emails, even to concurrent joins", async () => {
+    const { join, confirmations } = await setup({ confirmEmail: true });
+    const start = Date.now();
+    await join("ada@example.com");
+    for (const minutes of [5, 10, 15, 20, 25]) {
+      vi.useFakeTimers({ now: start + minutes * 60_000, toFake: ["Date"] });
+      try {
+        await Promise.all(Array.from({ length: 3 }, () => join("ada@example.com")));
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+    expect(confirmations).toHaveLength(4);
+  });
+
+  it("run onJoin and send one invite when the link is opened several times at once", async () => {
+    const onJoin = vi.fn();
+    const { auth, context, join, confirmations, invites, storedFor } = await setup({
+      confirmEmail: true,
+      autoApprove: true,
+      onJoin,
+    });
+    await join("ada@example.com");
+    const { token } = present(confirmations[0], "confirmation");
+    // Slow writes, so every request has read the entry before any writes.
+    const update = context.adapter.update.bind(context.adapter);
+    vi.spyOn(context.adapter, "update").mockImplementation(async (data) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return update(data);
+    });
+
+    const answers = await Promise.all(
+      Array.from({ length: 5 }, () => auth.api.confirmWaitlistEmail({ body: { token } })),
+    );
+    expect(answers).toEqual(Array.from({ length: 5 }, () => ({ success: true })));
+    expect(onJoin).toHaveBeenCalledOnce();
+    expect(invites).toHaveLength(1);
+    // The invite code sent is the one stored.
+    const stored = await storedFor("ada@example.com");
+    expect(stored.inviteCodeHash).toBe(await sha256(present(invites[0], "invite").inviteCode));
+  });
+
+  it("send one invite when admins approve the same entry at once", async () => {
+    const { auth, join, entryFor, invites, storedFor, adminHeaders } = await setup();
+    await join("ada@example.com");
+    const { id } = present(await entryFor("ada@example.com"), "entry");
+
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        auth.api.approveWaitlistEntries({ body: { ids: [id] }, headers: adminHeaders }),
+      ),
+    );
+    const approved = results.flatMap((result) => result.entries);
+    expect(approved).toHaveLength(1);
+    expect(invites).toHaveLength(1);
+    const { inviteCode } = present(approved[0], "approved entry");
+    expect(present(invites[0], "invite").inviteCode).toBe(inviteCode);
+    expect((await storedFor("ada@example.com")).inviteCodeHash).toBe(
+      await sha256(present(inviteCode, "invite code")),
+    );
+  });
+
+  it("let only one of a concurrent approval and rejection win", async () => {
+    const { auth, join, entryFor, invites, adminHeaders } = await setup();
+    await join("ada@example.com");
+    const { id } = present(await entryFor("ada@example.com"), "entry");
+
+    const [approval, rejection] = await Promise.allSettled([
+      auth.api.approveWaitlistEntries({ body: { ids: [id] }, headers: adminHeaders }),
+      auth.api.rejectWaitlistEntry({ body: { id }, headers: adminHeaders }),
+    ]);
+    const approvedCount = approval.status === "fulfilled" ? approval.value.entries.length : 0;
+    const rejected = rejection.status === "fulfilled";
+    expect(approvedCount + (rejected ? 1 : 0)).toBe(1);
+    if (!rejected) {
+      expect(rejection.reason).toMatchObject({
+        statusCode: 409,
+        body: { code: "ENTRY_CHANGED" },
+      });
+    }
+    const entry = present(await entryFor("ada@example.com"), "entry");
+    expect(entry.status).toBe(rejected ? "rejected" : "approved");
+    expect(invites).toHaveLength(approvedCount);
   });
 });
 

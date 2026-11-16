@@ -58,9 +58,6 @@ plugins are on `0.x`, fixes come as a new release of the newest `0.x`
 line; upgrade to get them. `canary` versions (snapshots of unreleased
 changes) are for trying things out, not for production.
 
-Nothing has been published to npm yet; this applies from the first
-release.
-
 ## Scope
 
 In scope: the published plugins in `packages/*` (server and client

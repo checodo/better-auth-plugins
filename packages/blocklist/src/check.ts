@@ -95,20 +95,40 @@ export async function findBlockingRule(
 }
 
 /**
- * Calls `onBlocked` and records a `blocklist.blocked` audit event. Errors
- * from `onBlocked` are logged, never returned to the client. Passwords
- * are never passed on: their `value` is `REDACTED`.
+ * What `onBlocked` and the audit log may see of a blocked value. Passwords
+ * are never passed on: their `value` is `REDACTED`, and so is the value of
+ * the password rule that matched, since an `exact` rule is the password
+ * and a `contains` rule part of it. `contextRule` marks the rules of the
+ * context check, whose value names the source (`[email]`), not a password.
+ */
+function redact(details: {
+  target: BlocklistTarget;
+  value: string;
+  rule: BlocklistRule;
+  contextRule?: boolean;
+}): { target: BlocklistTarget; value: string; rule: BlocklistRule } {
+  if (details.target !== "password") {
+    return { target: details.target, value: details.value, rule: details.rule };
+  }
+  const rule = details.contextRule ? details.rule : { ...details.rule, value: REDACTED };
+  return { target: details.target, value: REDACTED, rule };
+}
+
+/**
+ * Calls `onBlocked` and records a `blocklist.blocked` audit event, with
+ * passwords redacted (see `redact`). Errors from `onBlocked` are logged,
+ * never returned to the client.
  */
 async function reportBlocked(
   options: ResolvedBlocklistOptions,
-  details: { target: BlocklistTarget; value: string; rule: BlocklistRule },
+  details: { target: BlocklistTarget; value: string; rule: BlocklistRule; contextRule?: boolean },
   errorCode: BlocklistErrorCode,
   logger: Logger | undefined,
 ): Promise<void> {
-  const value = details.target === "password" ? REDACTED : details.value;
+  const safe = redact(details);
   if (options.onBlocked) {
     try {
-      await options.onBlocked({ ...details, value });
+      await options.onBlocked(safe);
     } catch (error) {
       (logger ?? console).error("[blocklist] onBlocked threw an error", error);
     }
@@ -119,9 +139,9 @@ async function reportBlocked(
     severity: "medium",
     errorCode,
     metadata: {
-      target: details.target,
-      value: value.slice(0, 255),
-      rule: { type: details.rule.type, value: details.rule.value },
+      target: safe.target,
+      value: safe.value.slice(0, 255),
+      rule: { type: safe.rule.type, value: safe.rule.value },
     },
   });
 }
@@ -184,6 +204,7 @@ export async function assertPasswordAllowed(
       target: "password",
       value: password,
       rule: { type: "contains", value: `[${found.source}]`, reason: "Context-specific word" },
+      contextRule: true,
     },
     code,
     logger,
