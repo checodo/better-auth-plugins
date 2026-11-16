@@ -213,7 +213,9 @@ export function createAdminEndpoints(options: ResolvedWaitlistOptions) {
         assertCanManage(ctx.context.session.user);
         const entry = await findEntryById(ctx.context.adapter, ctx.body.id);
         if (!entry) throw APIError.from("NOT_FOUND", WAITLIST_ERROR_CODES.ENTRY_NOT_FOUND);
-        await deleteEntry(ctx.context.adapter, ctx.body.id);
+        // Recorded once, also when admins delete the entry at the same time.
+        if (!(await deleteEntry(ctx.context.adapter, ctx.body.id)))
+          return ctx.json({ success: true });
         await recordAuditEvent({
           type: "waitlist.entry-deleted",
           severity: "medium",

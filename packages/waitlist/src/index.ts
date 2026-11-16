@@ -1,10 +1,13 @@
 import type { BetterAuthPlugin } from "@better-auth/core";
+import { createAuthMiddleware } from "better-auth/api";
 import { mergeSchema } from "better-auth/db";
 import { version } from "../package.json";
+import { createCleanup } from "./cleanup";
 import { WAITLIST_ERROR_CODES } from "./error-codes";
 import { createDatabaseHooks } from "./hooks/database";
 import { resolveOptions } from "./options";
 import { createAdminEndpoints } from "./routes/admin";
+import { createCleanupEndpoints } from "./routes/cleanup";
 import { createJoinEndpoints } from "./routes/join";
 import { waitlistSchema } from "./schema";
 import type { WaitlistOptions } from "./types";
@@ -18,6 +21,7 @@ export type {
   WaitlistInvite,
   WaitlistJoinedEntry,
   WaitlistOptions,
+  WaitlistRetention,
 } from "./types";
 
 /**
@@ -58,6 +62,7 @@ const PUBLIC_PATHS = new Set([
  */
 export const waitlist = (options: WaitlistOptions = {}) => {
   const resolved = resolveOptions(options);
+  const cleanup = createCleanup(resolved);
 
   return {
     id: "waitlist",
@@ -70,6 +75,18 @@ export const waitlist = (options: WaitlistOptions = {}) => {
     endpoints: {
       ...createJoinEndpoints(resolved),
       ...createAdminEndpoints(resolved),
+      ...createCleanupEndpoints(cleanup),
+    },
+    hooks: {
+      before: [
+        {
+          // Any waitlist request may start a cleanup in the background.
+          matcher: (context) => !!context.path?.startsWith("/waitlist/"),
+          handler: createAuthMiddleware(async (ctx) => {
+            cleanup.maybeSweep(ctx.context);
+          }),
+        },
+      ],
     },
     rateLimit: [{ pathMatcher: (path) => PUBLIC_PATHS.has(path), window: 60, max: 5 }],
     $ERROR_CODES: WAITLIST_ERROR_CODES,

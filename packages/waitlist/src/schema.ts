@@ -41,6 +41,15 @@ export const waitlistSchema = {
         type: "string",
         required: false,
       },
+      /**
+       * When the email was confirmed through the link (double opt-in).
+       * `null` without `confirmEmail`, for emails invited directly before
+       * they confirmed, and for entries confirmed before this field existed.
+       */
+      confirmedAt: {
+        type: "date",
+        required: false,
+      },
       /** Not a foreign key: the entry outlives the admin's account. */
       approvedBy: {
         type: "string",

@@ -1,4 +1,5 @@
 import type { BetterAuthPlugin } from "@better-auth/core";
+import { recordAuditEvent } from "@repo/plugin-utils/audit";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import * as z from "zod";
 import { WAITLIST_ERROR_CODES } from "../error-codes";
@@ -206,7 +207,7 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
           adapter,
           entry.id,
           [{ field: "status", value: "unconfirmed" }, sameToken],
-          { status: "pending" },
+          { status: "pending", confirmedAt: new Date() },
         );
         if (!confirmed) return ctx.json({ success: true });
         if (await isOverfilled(adapter)) {
@@ -218,11 +219,21 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
             [{ field: "status", value: "pending" }, sameToken],
             {
               status: "unconfirmed",
+              confirmedAt: null,
               updatedAt: new Date(entry.updatedAt),
             },
           );
           throw APIError.from("FORBIDDEN", WAITLIST_ERROR_CODES.WAITLIST_FULL);
         }
+        // A second record of the confirmation, apart from the entry (and
+        // tamper-evident with the audit log's hash chain). Nobody is signed in.
+        await recordAuditEvent({
+          type: "waitlist.confirmed",
+          severity: "low",
+          userId: null,
+          actorUserId: null,
+          metadata: { entryId: confirmed.id, email: confirmed.email },
+        });
         await completeJoin(ctx.context, options, confirmed, ctx.body.token);
         return ctx.json({ success: true });
       },
@@ -267,7 +278,16 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
       },
       async (ctx) => {
         const entry = await entryForToken(ctx.context.adapter, ctx.body.token);
-        await deleteEntry(ctx.context.adapter, entry.id);
+        // The entry is gone; the event is what's left of the person leaving.
+        // Once, also when the link is opened several times at once.
+        if (!(await deleteEntry(ctx.context.adapter, entry.id))) return ctx.json({ success: true });
+        await recordAuditEvent({
+          type: "waitlist.left",
+          severity: "low",
+          userId: null,
+          actorUserId: null,
+          metadata: { entryId: entry.id, email: entry.email, status: entry.status },
+        });
         return ctx.json({ success: true });
       },
     ),

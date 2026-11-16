@@ -224,25 +224,32 @@ The [waitlist](/docs/waitlist) gates sign-up behind admin approval.
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | SOC 2 CC6.2 (registers and authorizes new users before access), ISO A.5.16 | Every way of creating a user is gated: only approved emails (and what you let through with `allow` or `bypass`) get an account; with the audit log, approvals are recorded |
 | SOC 2 P2.1, GDPR Art. 7                                    | [Double opt-in](/docs/waitlist#double-opt-in) verifies the email address before an entry counts, and the leave link lets a person leave the waitlist and deletes the entry. These features can support a consent process, but they do not establish or record valid consent by themselves (see below) |
-| GDPR Art. 5(1)(e), ISO A.5.34 (Privacy and protection of PII) | Unconfirmed entries are deleted once their link has expired, the next time someone joins   |
+| GDPR Art. 5(1)(e), ISO A.5.34 (Privacy and protection of PII) | Unconfirmed entries are deleted once their link has expired, and with the opt-in [`retention`](/docs/waitlist#privacy), rejected and registered entries after the period you choose. This can support storage limitation; backups and other copies remain your responsibility |
 
 Left to you:
 
 - **Email verification is not proof of consent.** The confirmation link
   verifies control of the email address and records that the person
-  confirmed their waitlist entry. If consent is your legal basis, you
-  must also present a clear, specific consent statement and retain
-  evidence of what the person agreed to, when, and how. Store the
-  relevant purpose and notice version alongside the confirmation: pass
-  them as `metadata` in the join request; it is stored with the entry.
+  confirmed their waitlist entry; `confirmedAt` records when. If consent
+  is your legal basis, you must also present a clear, specific consent
+  statement and retain evidence of what the person agreed to, when, and
+  how. Store the relevant purpose and notice version alongside the
+  confirmation: pass them as `metadata` in the join request; it is
+  stored with the entry. With the audit log, confirmations
+  (`waitlist.confirmed`) and people leaving (`waitlist.left`) are also
+  recorded there, and the record of leaving remains after the entry is
+  deleted. Those events contain the email address; the audit log's
+  retention period applies to them.
 - **Direct invitations skip email verification.** An admin can invite an
   unconfirmed email directly (`createInvite`). The application must
   determine and document the appropriate legal basis for processing
   that email address. If consent is the legal basis, obtain and retain
   evidence of valid consent separately.
 - **Old entries.** Rejected and registered entries are kept until an
-  admin deletes them. Delete what you no longer need, see
-  [Privacy](/docs/waitlist#privacy).
+  admin deletes them, unless you set `retention`. Choose periods that fit
+  your purpose, see [Privacy](/docs/waitlist#privacy). The cleanup is
+  started by waitlist requests; schedule `deleteExpiredWaitlistEntries`
+  if you need predictable periodic cleanup.
 - **Deleted users.** Their entry is kept as `registered`; delete it with
   `deleteEntry`.
 
@@ -257,8 +264,6 @@ Things the plugins don't do yet, so you don't find out in an audit:
   `auth.api.listAuditEvents` to hand events to an auditor or to a user.
 - **No account lockout.** Failed sign-ins are recorded and rate limited
   per IP address, not counted per account.
-- **No confirmation time on waitlist entries.** An entry shows that its
-  email was confirmed (its status), not when.
 
 ## Not covered
 

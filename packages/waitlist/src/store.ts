@@ -67,6 +67,7 @@ export async function createEntry(
       tokenHash: input.tokenHash,
       confirmationsSent: input.confirmationsSent,
       metadata: input.metadata ?? null,
+      confirmedAt: null,
       createdAt: now,
       updatedAt: now,
     },
@@ -111,14 +112,54 @@ export async function updateEntryIf(
  * Deletes unconfirmed entries whose confirmation link was last sent
  * before `cutoff`, so emails nobody confirmed aren't kept.
  */
-export async function deleteStaleUnconfirmedEntries(adapter: Adapter, cutoff: Date): Promise<void> {
-  await adapter.deleteMany({
+export async function deleteStaleUnconfirmedEntries(
+  adapter: Adapter,
+  cutoff: Date,
+): Promise<number> {
+  return adapter.deleteMany({
     model: MODEL,
     where: [
       { field: "status", value: "unconfirmed" },
       { field: "updatedAt", value: cutoff, operator: "lt" },
     ],
   });
+}
+
+/**
+ * Deletes the entries `cutoffs` say have expired: unconfirmed entries
+ * whose confirmation link was last sent before `unconfirmed`, rejected
+ * entries last changed before `rejected`, and registered entries whose
+ * account was created before `registered`. Returns how many.
+ */
+export async function deleteExpiredEntries(
+  adapter: Adapter,
+  cutoffs: { unconfirmed: Date; rejected?: Date | undefined; registered?: Date | undefined },
+): Promise<number> {
+  const deletions = [deleteStaleUnconfirmedEntries(adapter, cutoffs.unconfirmed)];
+  if (cutoffs.rejected) {
+    deletions.push(
+      adapter.deleteMany({
+        model: MODEL,
+        where: [
+          { field: "status", value: "rejected" },
+          { field: "updatedAt", value: cutoffs.rejected, operator: "lt" },
+        ],
+      }),
+    );
+  }
+  if (cutoffs.registered) {
+    deletions.push(
+      adapter.deleteMany({
+        model: MODEL,
+        where: [
+          { field: "status", value: "registered" },
+          { field: "registeredAt", value: cutoffs.registered, operator: "lt" },
+        ],
+      }),
+    );
+  }
+  const counts = await Promise.all(deletions);
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /**
@@ -151,8 +192,9 @@ export async function countPendingBefore(
   return earlier + sameTime;
 }
 
-export async function deleteEntry(adapter: Adapter, id: string): Promise<void> {
-  await adapter.delete({ model: MODEL, where: [{ field: "id", value: id }] });
+/** Returns `false` when there was nothing to delete: another request deleted it first. */
+export async function deleteEntry(adapter: Adapter, id: string): Promise<boolean> {
+  return (await adapter.deleteMany({ model: MODEL, where: [{ field: "id", value: id }] })) > 0;
 }
 
 function filters(input: { status?: WaitlistEntryStatus | undefined; search?: string | undefined }) {
