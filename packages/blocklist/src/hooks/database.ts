@@ -2,6 +2,7 @@ import type { AuthContext, BetterAuthOptions, GenericEndpointContext } from "@be
 import { getCurrentAdapter } from "@better-auth/core/context";
 import { assertNotBlocked } from "../check";
 import type { ResolvedBlocklistOptions } from "../types";
+import { checkClientIp } from "./ip";
 
 type Adapter = AuthContext["adapter"];
 
@@ -29,6 +30,9 @@ async function isTaken(adapter: Adapter, field: "email" | "username", value: unk
  * magic link, email OTP, the admin plugin, `/update-user`, or the email
  * change verification. On update, unchanged emails and usernames are
  * skipped (see `isTaken`).
+ *
+ * Also checks the client IP: on user creation for the `"sign-up"` scope,
+ * and on session creation for the `"sign-in"` scope.
  */
 export function createDatabaseHooks(
   authContext: AuthContext,
@@ -58,12 +62,20 @@ export function createDatabaseHooks(
     user: {
       create: {
         before: async (user, context) => {
+          await checkClientIp(context, options, "sign-up");
           await check(user, context, "create");
         },
       },
       update: {
         before: async (user, context) => {
           await check(user, context, "update");
+        },
+      },
+    },
+    session: {
+      create: {
+        before: async (_session, context) => {
+          await checkClientIp(context, options, "sign-in");
         },
       },
     },

@@ -75,8 +75,9 @@ export default function Home() {
         description={
           <>
             Try a disposable address (<Code>me@mailinator.com</Code>, even{" "}
-            <Code>me@eu.mailinator.com</Code>), <Code>blocked+tag@acme.test</Code>, or a reserved
-            username like <Code>admin</Code> or <Code>support</Code>.
+            <Code>me@eu.mailinator.com</Code>), <Code>blocked+tag@acme.test</Code>, a reserved
+            username like <Code>admin</Code> or <Code>support</Code>, or a password like{" "}
+            <Code>P@ssw0rd123</Code> or one that contains your email or username.
           </>
         }
       >

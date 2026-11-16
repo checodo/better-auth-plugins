@@ -48,6 +48,11 @@ export const authOptions = {
       username: { values: reservedUsernames },
       organization: { values: reservedUsernames },
       team: { values: [{ value: "staff", type: "contains" }] },
+      // Passwords with the email, username, or app name are blocked too.
+      password: { values: ["password123", { value: "qwerty", type: "contains" }] },
+      // A documentation range (RFC 5737), so localhost keeps working. Send
+      // `x-forwarded-for: 203.0.113.7` to try it, or add a rule on the Admin page.
+      ip: { ranges: ["203.0.113.0/24"] },
       onBlocked: ({ target, value, rule }) => {
         console.info(
           `[blocklist] blocked ${target} "${value}" by ${rule.type} rule "${rule.value}"`,

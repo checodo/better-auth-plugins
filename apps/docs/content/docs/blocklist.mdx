@@ -1,6 +1,6 @@
 ---
 title: Blocklist
-description: Block disallowed emails, usernames, and organization and team names.
+description: Block disallowed emails, usernames, organization and team names, passwords, and IP addresses.
 ---
 
 The blocklist plugin stops disallowed values whenever they are created or
@@ -14,6 +14,9 @@ change at runtime.
 - Normalizes before matching, so `ADMIN`, ` admin `, and `аdmin` with a
   Cyrillic "а" are all caught.
 - Ships opt-in lists of disposable email domains and reserved usernames.
+- Blocks weak passwords, including ones that contain the user's email,
+  username, or the app name, and sign-ups and sign-ins from IP addresses,
+  ranges, or countries you choose.
 
 ## Installation
 
@@ -134,6 +137,8 @@ A blocked value fails the request with a `400`:
 | `username`     | Username and display username on every user creation and update, and `/is-username-available`                                       | `username` plugin                   |
 | `organization` | Name and slug on `/organization/create` and `/organization/update`, and slug on `/organization/check-slug`                             | `organization` plugin               |
 | `team`         | Name on `/organization/create-team` and `/organization/update-team`, and the default team's name on `/organization/create`           | `organization` plugin, with `teams` |
+| `password`     | New passwords on `/sign-up/email`, `/change-password`, `/set-password`, `/reset-password`, `/email-otp/reset-password`, `/phone-number/reset-password`, `/admin/create-user`, and `/admin/set-user-password` (see [Passwords](#passwords)) | -                                   |
+| `ip`           | The client IP address and country on every sign-up and sign-in (see [IP addresses and countries](#ip-addresses-and-countries))        | -                                   |
 
 Emails and usernames are checked in database hooks, so every way a user is
 created or updated is covered, including OAuth sign-ups and admin actions.
@@ -153,6 +158,110 @@ organization, so that name must also pass the team rules.
   and they run on every keystroke.
 </Callout>
 
+### Passwords
+
+`password` rules block new passwords, wherever one is set: sign-up,
+change, reset (by link, email OTP, or phone OTP), and when an admin
+creates a user or sets a password. Passwords are never checked on
+sign-in, so a rule added later doesn't lock anyone out.
+
+```ts title="auth.ts"
+blocklist({
+  password: {
+    values: [
+      "password123",
+      { value: "qwerty", type: "contains" },
+      { value: "^\\d+$", type: "regex", reason: "Digits only" },
+    ],
+  },
+});
+```
+
+Passwords are compared after [normalization](#normalization) and with
+leetspeak folded, so the rule `password123` also blocks `P@ssw0rd123`
+and `pa55word123`. `regex` rules run on the normalized password before
+folding, so `\d` still means a digit.
+
+With the `password` option set, a built-in **context check** also blocks
+passwords that contain the user's email address (its local part, without
+a `+tag`), username, or the app name (`appName`, when you set one), each
+whole and split into words, ignoring words shorter than 4 characters.
+`jane.doe@example.com` can't use `JaneDoe2024` or `doe-r4y-jane`. NIST
+SP 800-63B asks for this ("context-specific words"). Turn it off with
+`checkContext: false`.
+
+A password is checked when better-auth hashes it, so after its own
+length checks and after a reset token or OTP is verified: the rules
+can't be probed without one, and a blocked attempt doesn't use up the
+token.
+
+<Callout title="Passwords are never passed on">
+  `onBlocked` and the [audit log](/docs/audit-log) get `"[redacted]"` as
+  the value, never the password. For the context check, the rule's value
+  says where the word came from: `"[email]"`, `"[username]"`, or
+  `"[appName]"`.
+</Callout>
+
+<Callout title="With haveIBeenPwned">
+  The rules complement better-auth's
+  [`haveIBeenPwned`](https://better-auth.com/docs/plugins/have-i-been-pwned)
+  plugin, which rejects passwords found in data breaches. Both check the
+  same endpoints and can be used together.
+</Callout>
+
+### IP addresses and countries
+
+`ip` rules block sign-ups and sign-ins from addresses, CIDR ranges, or
+countries, with a `403`:
+
+```ts title="auth.ts"
+blocklist({
+  ip: {
+    values: ["203.0.113.7", "2001:db8::1"],
+    ranges: ["198.51.100.0/24", "2001:db8:bad::/48"],
+    allow: ["198.51.100.10"], // always allowed, also an address or a range
+    countries: ["KP"],
+    // Only when your app runs behind Cloudflare, which sets this header.
+    getCountry: ({ headers }) => headers.get("cf-ipcountry"),
+  },
+});
+```
+
+```json
+{ "code": "IP_ADDRESS_NOT_ALLOWED", "message": "Signing up or signing in from this network or location is not allowed" }
+```
+
+- **Where**: `scope` picks `"sign-up"` (creating users), `"sign-in"`
+  (creating sessions, including the automatic sign-in after sign-up), or
+  both, the default. `/sign-up/*` and `/sign-in/*` are checked before the
+  handler runs, so a blocked client doesn't even learn whether a password
+  was right. Users and sessions are checked again when they are created,
+  which covers OAuth callbacks, magic links, and every other way in.
+  Admin endpoints (`/admin/*`) aren't checked, and existing sessions are
+  not revoked.
+- **Which address**: the one better-auth uses for rate limiting, from its
+  [`advanced.ipAddress`](https://better-auth.com/docs/reference/options#advanced)
+  settings (`ipAddressHeaders`, `trustedProxies`, `disableIpTracking`).
+  IPv6 addresses are compared in full, not collapsed to their `/64`
+  network as for rate limiting; use a range to block a network. Without
+  an address, only country rules apply.
+- **Countries**: `getCountry` returns the two-letter country code of a
+  request, usually from a header your host or proxy sets:
+  `cf-ipcountry` on Cloudflare (which also sends `T1` for Tor),
+  `x-vercel-ip-country` on Vercel, or `request.cf.country` in a Cloudflare
+  Worker. There is no built-in geo-IP database.
+
+<Callout type="warn" title="Only trust headers your proxy sets">
+  Clients can send `cf-ipcountry` or `x-forwarded-for` themselves. Read a
+  header only when a proxy in front of your app always sets it, and
+  configure better-auth's `trustedProxies` so the forwarded address is the
+  client's. IP and country rules keep out casual abuse; they are not a
+  security boundary against someone with a VPN.
+</Callout>
+
+`genericErrorMessage` doesn't apply to `ip`: there is no form field to
+hide.
+
 ### Rule types
 
 A rule is a plain string (an `exact` rule) or an object with a `type`:
@@ -165,10 +274,14 @@ A rule is a plain string (an `exact` rule) or an object with a `type`:
 | `suffix`   | ends with the rule                                        | `{ value: "-bot", type: "suffix" }`                  |
 | `contains` | contains the rule                                         | `{ value: "official", type: "contains" }`            |
 | `regex`    | matches the rule as a regular expression                  | `{ value: "^admin\\d+$", type: "regex" }`            |
+| `cidr`     | is an IP address inside the range                         | `{ value: "198.51.100.0/24", type: "cidr" }`         |
+| `country`  | comes from the country (see `getCountry`)                 | `{ value: "KP", type: "country" }`                   |
 
 Rules can carry a `reason`, which is passed to `onBlocked`. `domain` rules
-only work for `email`. Invalid static rules throw when the plugin is
-created, so mistakes show up at startup.
+only work for `email`. The `ip` target takes `exact` (an address),
+`cidr`, and `country` rules only, and no other target takes `cidr` or
+`country`. Invalid static rules throw when the plugin is created, so
+mistakes show up at startup.
 
 <Callout type="warn" title="Regular expressions">
   A slow pattern runs on every sign-up, so `regex` rules are restricted to
@@ -209,6 +322,13 @@ never stored normalized; rules created through the endpoints are (see
 6. For emails, drop trailing dots of the domain (`mailinator.com.` is the
    same host as `mailinator.com`), and ignore a `+tag` in the local part
    (`stripPlusAddressing`).
+7. For passwords, fold leetspeak (`@` and `4` to `a`, `0` to `o`, `1`,
+   `l`, `!`, and `|` to `i`, `3` to `e`, `$` and `5` to `s`, ...), except
+   for `regex` rules.
+
+IP addresses and ranges are compared in their canonical form instead, so
+`2001:0DB8::0001` and `2001:db8::1` are the same address, and
+`::ffff:192.0.2.1` is `192.0.2.1`.
 
 Steps 2 to 5 can be turned off with `normalize: false`. A `regex` runs
 against the normalized value, so write it in lowercase: a pattern with
@@ -310,7 +430,7 @@ has one of `adminRoles` (the `role` field of better-auth's
 
 ```ts
 const { data, error } = await authClient.blocklist.createRule({
-  target: "email", // "email" | "username" | "organization" | "team"
+  target: "email", // "email" | "username" | "organization" | "team" | "password" | "ip"
   type: "domain", // defaults to "exact"
   value: "spam.example",
   reason: "Disposable provider", // optional
@@ -338,11 +458,13 @@ await authClient.blocklist.deleteRule({ id: "rule-id" });
 | `POST /blocklist/delete-rule` | `authClient.blocklist.deleteRule` | `auth.api.deleteBlocklistRule` |
 
 New rules are validated: duplicates, values longer than 255 characters,
-`domain` rules outside `email`, unsafe regular expressions, and targets
-with `useDatabase: false` are rejected. Values are stored the way they are
-matched (lowercase and normalized, domains without a leading `@`), so
-`Spam.io` and `spam.io` count as the same rule. Regular expressions are
-stored as written.
+rule types the target doesn't take, unsafe regular expressions, invalid
+IP addresses, ranges, or country codes, `country` rules without
+`getCountry`, and targets with `useDatabase: false` are rejected. Values
+are stored the way they are matched (lowercase and normalized, domains
+without a leading `@`, IP addresses and ranges in canonical form, such
+as `198.51.100.0/24` for `198.51.100.77/24`), so `Spam.io` and `spam.io`
+count as the same rule. Regular expressions are stored as written.
 
 Database rules are cached for `databaseCacheTtl` (10 seconds by default).
 Changes through the endpoints apply right away on the server that made
@@ -370,12 +492,12 @@ Table: `blocklistRule`
   type={{
     id: { type: "string", description: "Unique id of the rule.", required: true },
     target: {
-      type: '"email" | "username" | "organization" | "team"',
+      type: '"email" | "username" | "organization" | "team" | "password" | "ip"',
       description: "The kind of value the rule applies to. Indexed.",
       required: true,
     },
     type: {
-      type: '"exact" | "domain" | "prefix" | "suffix" | "contains" | "regex"',
+      type: '"exact" | "domain" | "prefix" | "suffix" | "contains" | "regex" | "cidr" | "country"',
       description: "How the value is matched.",
       required: true,
     },
@@ -417,14 +539,20 @@ if (error?.code === BLOCKLIST_ERROR_CODES.EMAIL_NOT_ALLOWED.code) {
 | `EMAIL_NOT_ALLOWED`                             | 400    | A blocked email                                   |
 | `USERNAME_NOT_ALLOWED`                          | 400    | A blocked username                                |
 | `ORGANIZATION_NAME_NOT_ALLOWED`                 | 400    | A blocked organization name or slug               |
-| `TEAM_NAME_NOT_ALLOWED`                         | 400    | A blocked team name                               |
-| `VALUE_NOT_ALLOWED`                             | 400    | Any blocked value, with `genericErrorMessage`     |
+| `TEAM_NAME_NOT_ALLOWED`                          | 400    | A blocked team name                               |
+| `PASSWORD_NOT_ALLOWED`                          | 400    | A password blocked by a rule                      |
+| `PASSWORD_CONTAINS_CONTEXT_WORD`                | 400    | A password with the email, username, or app name  |
+| `IP_ADDRESS_NOT_ALLOWED`                        | 403    | Sign-up or sign-in from a blocked IP or country   |
+| `VALUE_NOT_ALLOWED`                             | 400    | Any blocked value but an IP, with `genericErrorMessage` |
 | `YOU_ARE_NOT_ALLOWED_TO_MANAGE_BLOCKLIST_RULES` | 403    | Rule endpoints, for users who aren't admins       |
 | `RULE_ALREADY_EXISTS`                           | 400    | Creating a duplicate rule                         |
 | `RULE_NOT_FOUND`                                | 404    | Deleting a rule that doesn't exist                |
 | `INVALID_REGEX_RULE`                            | 400    | Creating an invalid or unsafe `regex` rule        |
 | `REGEX_RULE_MUST_BE_LOWERCASE`                  | 400    | Creating a `regex` rule with uppercase letters    |
 | `DOMAIN_RULE_ONLY_FOR_EMAIL`                    | 400    | Creating a `domain` rule outside `email`          |
+| `RULE_TYPE_NOT_SUPPORTED_FOR_TARGET`            | 400    | Creating a rule of a type the target doesn't take |
+| `INVALID_IP_RULE`                               | 400    | Creating an invalid IP, range, or country rule    |
+| `COUNTRY_RULES_REQUIRE_GET_COUNTRY`             | 400    | Creating a `country` rule without `getCountry`    |
 | `DATABASE_RULES_DISABLED_FOR_TARGET`            | 400    | Creating a rule for a target with `useDatabase: false` |
 | `RULE_VALUE_TOO_LONG`                           | 400    | Creating a rule whose normalized value is too long |
 
@@ -448,6 +576,16 @@ if (error?.code === BLOCKLIST_ERROR_CODES.EMAIL_NOT_ALLOWED.code) {
     team: {
       type: "BlocklistTargetOptions",
       description: "Rules for team names. Requires the `organization` plugin with teams.",
+    },
+    password: {
+      type: "BlocklistPasswordOptions",
+      description:
+        "Rules for new passwords, and the context check. See [Passwords](#passwords).",
+    },
+    ip: {
+      type: "BlocklistIpOptions",
+      description:
+        "Rules for the client IP address and country on sign-up and sign-in. See [IP addresses and countries](#ip-addresses-and-countries).",
     },
     normalize: {
       type: "boolean",
@@ -483,7 +621,7 @@ if (error?.code === BLOCKLIST_ERROR_CODES.EMAIL_NOT_ALLOWED.code) {
     onBlocked: {
       type: "({ target, value, rule }) => void | Promise<void>",
       description:
-        "Called whenever a create or update is blocked, before the request fails. Useful for logging or auditing. Errors thrown here are logged and don't change the response.",
+        'Called whenever a value is blocked, before the request fails. Useful for logging or auditing. `value` is `"[redacted]"` for passwords, and the IP address or country code for `ip`. Errors thrown here are logged and don\'t change the response.',
     },
   }}
 />
@@ -527,6 +665,49 @@ In addition to the target options:
       default: "true",
       description:
         "Ignore a `+tag` in the local part, so a rule for `user@example.org` also matches `user+tag@example.org`.",
+    },
+  }}
+/>
+
+### Password options
+
+The target options without `allow`, plus:
+
+<TypeTable
+  type={{
+    checkContext: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Also block passwords that contain the user's email (local part), username, or the app name.",
+    },
+  }}
+/>
+
+### IP options
+
+In addition to the target options (`values` take `exact` addresses and
+`cidr` or `country` rules; `allow` takes addresses and ranges):
+
+<TypeTable
+  type={{
+    ranges: {
+      type: "string[]",
+      description: "Blocked CIDR ranges, IPv4 or IPv6. Shorthand for `cidr` rules.",
+    },
+    countries: {
+      type: "string[]",
+      description: 'Blocked two-letter country codes, such as `"KP"`. Shorthand for `country` rules. Requires `getCountry`.',
+    },
+    getCountry: {
+      type: "({ request, headers }) => string | null | undefined | Promise<...>",
+      description:
+        "Returns the country code of a request, usually from a header your host or proxy sets. Required for country rules.",
+    },
+    scope: {
+      type: '("sign-up" | "sign-in")[]',
+      default: '["sign-up", "sign-in"]',
+      description: "Where the rules apply: creating users, creating sessions, or both.",
     },
   }}
 />

@@ -4,6 +4,8 @@ import { version } from "../package.json";
 import { BLOCKLIST_ERROR_CODES } from "./error-codes";
 import { createBeforeHook } from "./hooks/before";
 import { createDatabaseHooks } from "./hooks/database";
+import { createIpHook } from "./hooks/ip";
+import { wrapPasswordHasher } from "./hooks/password";
 import { resolveOptions } from "./options";
 import { createRuleEndpoints } from "./routes/rules";
 import { blocklistSchema } from "./schema";
@@ -12,8 +14,11 @@ import type { BlocklistOptions } from "./types";
 export { BLOCKLIST_ERROR_CODES, type BlocklistErrorCode } from "./error-codes";
 export type {
   BlocklistEmailOptions,
+  BlocklistIpOptions,
+  BlocklistIpScope,
   BlocklistMatchType,
   BlocklistOptions,
+  BlocklistPasswordOptions,
   BlocklistRule,
   BlocklistRuleInput,
   BlocklistTarget,
@@ -22,8 +27,9 @@ export type {
 } from "./types";
 
 /**
- * Blocks disallowed emails, usernames, and organization and team names
- * when they are created or changed.
+ * Blocks disallowed emails, usernames, organization and team names, and
+ * passwords when they are created or changed, and sign-ups and sign-ins
+ * from blocked IP addresses or countries.
  *
  * @example
  * ```ts
@@ -47,13 +53,16 @@ export const blocklist = (options: BlocklistOptions = {}) => {
     id: "blocklist",
     version,
     init(ctx) {
-      return { options: { databaseHooks: createDatabaseHooks(ctx, resolved) } };
+      return {
+        options: { databaseHooks: createDatabaseHooks(ctx, resolved) },
+        context: { password: wrapPasswordHasher(ctx, resolved) },
+      };
     },
     // mergeSchema changes the object it gets, so each instance gets a copy.
     schema: mergeSchema(structuredClone(blocklistSchema), options.schema),
     endpoints: createRuleEndpoints(resolved),
     hooks: {
-      before: [createBeforeHook(resolved)],
+      before: [createIpHook(resolved), createBeforeHook(resolved)],
     },
     $ERROR_CODES: BLOCKLIST_ERROR_CODES,
     options,

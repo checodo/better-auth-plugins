@@ -1,10 +1,11 @@
 import type { InferOptionSchema } from "better-auth";
 import type { BlocklistSchema } from "./schema";
 import type { DatabaseRuleCache } from "./utils/database-rule-cache";
+import type { IpNetwork } from "./utils/ip";
 import type { RuleSet } from "./utils/rule-set";
 
 /** The kinds of values the blocklist guards. */
-export type BlocklistTarget = "email" | "username" | "organization" | "team";
+export type BlocklistTarget = "email" | "username" | "organization" | "team" | "password" | "ip";
 
 /**
  * How a rule's `value` is compared with the checked value. Both sides are
@@ -17,8 +18,21 @@ export type BlocklistTarget = "email" | "username" | "organization" | "team";
  * - `suffix`    the value ends with the rule
  * - `contains`  the value contains the rule
  * - `regex`     the value matches the rule as a regular expression source
+ * - `cidr`      IPs only: the address is inside the range (`203.0.113.0/24`)
+ * - `country`   IPs only: the request comes from the country (`getCountry`)
+ *
+ * The `ip` target takes `exact`, `cidr`, and `country` rules only; every
+ * other target takes everything but `cidr` and `country`.
  */
-export type BlocklistMatchType = "exact" | "domain" | "prefix" | "suffix" | "contains" | "regex";
+export type BlocklistMatchType =
+  | "exact"
+  | "domain"
+  | "prefix"
+  | "suffix"
+  | "contains"
+  | "regex"
+  | "cidr"
+  | "country";
 
 export interface BlocklistRuleInput {
   /** The pattern to match against: an address, a domain, a username, a regex source, ... */
@@ -71,6 +85,48 @@ export interface BlocklistEmailOptions extends BlocklistTargetOptions {
   stripPlusAddressing?: boolean | undefined;
 }
 
+export interface BlocklistPasswordOptions extends Omit<BlocklistTargetOptions, "allow"> {
+  /**
+   * Also block passwords that contain the user's email address (its local
+   * part), username, or the app name (`appName`), like NIST SP 800-63B
+   * asks for "context-specific words". Words shorter than 4 characters are
+   * ignored. Defaults to `true`.
+   */
+  checkContext?: boolean | undefined;
+}
+
+/** Where `ip` rules apply. */
+export type BlocklistIpScope = "sign-up" | "sign-in";
+
+export interface BlocklistIpOptions extends BlocklistTargetOptions {
+  /** Blocked CIDR ranges, IPv4 or IPv6. Shorthand for `{ value, type: "cidr" }` rules. */
+  ranges?: readonly string[] | undefined;
+  /**
+   * Blocked countries, as two-letter codes (`"KP"`). Shorthand for
+   * `{ value, type: "country" }` rules. Requires `getCountry`.
+   */
+  countries?: readonly string[] | undefined;
+  /**
+   * Returns the two-letter country code of a request, usually from a
+   * header your proxy or host sets, such as Cloudflare's `cf-ipcountry` or
+   * Vercel's `x-vercel-ip-country`. Only read such a header when the
+   * proxy sets it, since clients can send it too. Required for `country`
+   * rules.
+   */
+  getCountry?:
+    | ((context: {
+        request: Request | undefined;
+        headers: Headers;
+      }) => string | null | undefined | Promise<string | null | undefined>)
+    | undefined;
+  /**
+   * Where the rules apply: `"sign-up"` blocks creating users, `"sign-in"`
+   * blocks creating sessions (sign-in, and the automatic sign-in after
+   * sign-up). Defaults to both.
+   */
+  scope?: readonly BlocklistIpScope[] | undefined;
+}
+
 export interface BlocklistOptions {
   email?: BlocklistEmailOptions | undefined;
   /** Requires better-auth's `username` plugin. */
@@ -79,6 +135,18 @@ export interface BlocklistOptions {
   organization?: BlocklistTargetOptions | undefined;
   /** Checks team names. Requires better-auth's `organization` plugin with teams enabled. */
   team?: BlocklistTargetOptions | undefined;
+  /**
+   * Checks new passwords on sign-up, change, reset, and when an admin sets
+   * one. Rules from the database apply even without this option; the
+   * context check (`checkContext`) only runs when it is set.
+   */
+  password?: BlocklistPasswordOptions | undefined;
+  /**
+   * Checks the client IP address and country on sign-up and sign-in. The
+   * address is read the way better-auth reads it for rate limiting (see
+   * its `advanced.ipAddress` option).
+   */
+  ip?: BlocklistIpOptions | undefined;
   /**
    * Normalize values and rules before matching: trim, lowercase, Unicode
    * compatibility forms (fullwidth letters, ligatures), remove accents
@@ -114,7 +182,9 @@ export interface BlocklistOptions {
   databaseCacheTtl?: number | undefined;
   /**
    * Called whenever a value is blocked, before the request fails. Errors
-   * thrown here are logged and don't change the response.
+   * thrown here are logged and don't change the response. For passwords,
+   * `value` is always `"[redacted]"`; for a `country` rule it is the
+   * country code, for other `ip` rules the IP address.
    */
   onBlocked?:
     | ((details: {
@@ -128,8 +198,8 @@ export interface BlocklistOptions {
 export interface ResolvedTargetOptions {
   /** Static rules from the plugin options, compiled and indexed. */
   rules: RuleSet;
-  /** Normalized allow-list entries. */
-  allow: Set<string>;
+  /** Allow-list entries, compiled as `exact` rules (and `cidr` rules for IPs). */
+  allow: RuleSet;
   useDatabase: boolean;
 }
 
@@ -141,13 +211,22 @@ export interface ResolvedBlocklistOptions {
   adminUserIds: readonly string[];
   onBlocked: BlocklistOptions["onBlocked"];
   targets: Record<BlocklistTarget, ResolvedTargetOptions>;
+  password: { checkContext: boolean };
+  ip: {
+    scope: ReadonlySet<BlocklistIpScope>;
+    getCountry: BlocklistIpOptions["getCountry"];
+  };
   /** Compiled database rules per target, see `databaseCacheTtl`. */
   databaseRules: DatabaseRuleCache;
 }
 
-/** A rule prepared for matching: normalized value, or a compiled regular expression. */
+/**
+ * A rule prepared for matching: normalized value, a compiled regular
+ * expression, or a parsed IP range.
+ */
 export interface CompiledRule {
   rule: BlocklistRule;
   value: string;
   regex?: RegExp | undefined;
+  network?: IpNetwork | undefined;
 }

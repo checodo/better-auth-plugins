@@ -7,13 +7,13 @@ import type { BetterAuthPluginDBSchema } from "@better-auth/core/db";
 export const blocklistSchema = {
   blocklistRule: {
     fields: {
-      /** "email" | "username" | "organization" | "team" */
+      /** "email" | "username" | "organization" | "team" | "password" | "ip" */
       target: {
         type: "string",
         required: true,
         index: true,
       },
-      /** "exact" | "domain" | "prefix" | "suffix" | "contains" | "regex" */
+      /** "exact" | "domain" | "prefix" | "suffix" | "contains" | "regex" | "cidr" | "country" */
       type: {
         type: "string",
         required: true,
