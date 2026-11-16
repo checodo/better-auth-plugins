@@ -377,7 +377,10 @@ Trunk-based development: `main` plus short-lived feature branches.
 
 - A PR that changes anything under `packages/*` (except `packages/tooling`)
   needs a changeset: run `pnpm changeset`. Docs-only, playground-only,
-  and tooling-only PRs don't. `@repo/plugin-utils` itself gets no
+  tooling-only, and test-only PRs don't: tests aren't published, so
+  `changedFilePatterns` in `.changeset/config.json` leaves out each
+  package's `test/` folder. Don't add an empty or patch changeset for a
+  test: it would release an unchanged package. `@repo/plugin-utils` itself gets no
   changeset (it is never published); describe the change in a changeset
   for each plugin that bundles it.
 - While versions are `0.x`: `minor` for features and for breaking changes
