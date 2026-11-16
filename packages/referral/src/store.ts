@@ -61,9 +61,14 @@ export async function findReferralByReferredUserId(
   });
 }
 
+/**
+ * `trackReward`: the referral is created completed and `onReferralCompleted`
+ * is about to be called, its first attempt (see `firstRewardAttempt`).
+ */
 export async function createReferral(
   adapter: Adapter,
   input: Pick<Referral, "referrerUserId" | "referredUserId" | "code" | "status">,
+  { trackReward = false }: { trackReward?: boolean } = {},
 ): Promise<Referral> {
   const now = new Date();
   return adapter.create<Omit<Referral, "id">, Referral>({
@@ -72,7 +77,72 @@ export async function createReferral(
       ...input,
       completedAt: input.status === "completed" ? now : null,
       createdAt: now,
+      ...(trackReward && input.status === "completed" ? firstRewardAttempt(now) : {}),
     },
+  });
+}
+
+// ----- reward delivery (`onReferralCompleted`) -----
+
+/** The fields of a referral whose `onReferralCompleted` call starts now, its first. */
+export function firstRewardAttempt(now = new Date()) {
+  return { rewardStatus: "pending", rewardAttempts: 1, rewardAttemptAt: now } as const;
+}
+
+/**
+ * Completed referrals whose `onReferralCompleted` hasn't succeeded, whose
+ * last call started before `before`, and that have attempts left. Oldest
+ * attempts first.
+ */
+export async function listDueRewards(
+  adapter: Adapter,
+  input: { before: Date; maxAttempts: number; limit: number },
+): Promise<Referral[]> {
+  return adapter.findMany<Referral>({
+    model: "referral",
+    where: [
+      { field: "status", value: "completed" },
+      { field: "rewardStatus", value: "pending" },
+      { field: "rewardAttemptAt", value: input.before, operator: "lt" },
+      { field: "rewardAttempts", value: input.maxAttempts, operator: "lt" },
+    ],
+    sortBy: { field: "rewardAttemptAt", direction: "asc" },
+    limit: input.limit,
+  });
+}
+
+/**
+ * Starts another attempt for a due referral, in one conditional update:
+ * only while its attempt count is still the one read, so of concurrent
+ * retries only one calls `onReferralCompleted`. `null` if another took it.
+ */
+export async function claimRewardAttempt(
+  adapter: Adapter,
+  referral: Pick<Referral, "id" | "rewardAttempts">,
+  before: Date,
+): Promise<Referral | null> {
+  const attempts = referral.rewardAttempts ?? 0;
+  return adapter.update<Referral>({
+    model: "referral",
+    where: [
+      { field: "id", value: referral.id },
+      { field: "rewardStatus", value: "pending" },
+      { field: "rewardAttempts", value: attempts },
+      { field: "rewardAttemptAt", value: before, operator: "lt" },
+    ],
+    update: { rewardAttempts: attempts + 1, rewardAttemptAt: new Date() },
+  });
+}
+
+/** Records that `onReferralCompleted` returned without an error for the referral. */
+export async function markRewarded(adapter: Adapter, id: string): Promise<void> {
+  await adapter.update<Referral>({
+    model: "referral",
+    where: [
+      { field: "id", value: id },
+      { field: "rewardStatus", value: "pending" },
+    ],
+    update: { rewardStatus: "rewarded" },
   });
 }
 
@@ -129,15 +199,25 @@ export async function findSlotByKey(adapter: Adapter, key: string): Promise<Refe
 /**
  * Marks a pending referral completed. Returns `null` if it wasn't pending
  * (anymore), so only one caller gets to run `onReferralCompleted`.
+ * `trackReward`: that call is about to start, its first attempt.
  */
-export async function completeReferral(adapter: Adapter, id: string): Promise<Referral | null> {
+export async function completeReferral(
+  adapter: Adapter,
+  id: string,
+  { trackReward = false }: { trackReward?: boolean } = {},
+): Promise<Referral | null> {
+  const now = new Date();
   return adapter.update<Referral>({
     model: "referral",
     where: [
       { field: "id", value: id },
       { field: "status", value: "pending" },
     ],
-    update: { status: "completed", completedAt: new Date() },
+    update: {
+      status: "completed",
+      completedAt: now,
+      ...(trackReward ? firstRewardAttempt(now) : {}),
+    },
   });
 }
 

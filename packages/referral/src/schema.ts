@@ -57,6 +57,26 @@ export const referralSchema = {
         type: "date",
         required: true,
       },
+      /**
+       * Delivery of `onReferralCompleted`: "pending" until it returns
+       * without an error, then "rewarded". Empty for referrals completed
+       * without `onReferralCompleted` set, which are never retried.
+       */
+      rewardStatus: {
+        type: "string",
+        required: false,
+        index: true,
+      },
+      /** How often `onReferralCompleted` was called for the referral. */
+      rewardAttempts: {
+        type: "number",
+        required: false,
+      },
+      /** When the last call of `onReferralCompleted` started. */
+      rewardAttemptAt: {
+        type: "date",
+        required: false,
+      },
     },
     indexes: [{ fields: ["referredUserId"], unique: true }],
   },

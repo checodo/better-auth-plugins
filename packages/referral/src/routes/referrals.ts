@@ -7,10 +7,13 @@ import { REFERRAL_ERROR_CODES } from "../error-codes";
 import { MAX_STEP_LENGTH } from "../options";
 import { recordStep } from "../referrals";
 import {
+  claimRewardAttempt,
   countReferrals,
   findReferralByReferredUserId,
   findUsers,
+  listDueRewards,
   listReferrals,
+  markRewarded,
   stepsByReferral,
 } from "../store";
 import type { Referral, ReferralWithSteps, ResolvedReferralOptions } from "../types";
@@ -20,6 +23,9 @@ import { maskEmail } from "../utils/mask";
 export const MAX_PAGE_SIZE = 100;
 /** Longest JSON-encoded step `metadata`. */
 export const MAX_METADATA_LENGTH = 2000;
+/** Referrals one `retryReferralRewards` call retries by default, and at most. */
+export const DEFAULT_RETRY_BATCH = 50;
+export const MAX_RETRY_BATCH = 500;
 
 const pageSchema = paginationQuery({ defaultLimit: 20, maxLimit: MAX_PAGE_SIZE });
 const statusSchema = z
@@ -179,6 +185,69 @@ export function createReferralEndpoints(options: ResolvedReferralOptions) {
         const updated = await recordStep(adapter, ctx.context, options, referral, step, metadata);
         const [detailed] = await withSteps(adapter, [updated]);
         return ctx.json({ referral: detailed ?? null });
+      },
+    ),
+    /**
+     * Server only: no HTTP route. Call it regularly, e.g. every few
+     * minutes from a cron job, to call `onReferralCompleted` again for
+     * completed referrals whose call failed or never finished.
+     */
+    retryReferralRewards: createAuthEndpoint(
+      {
+        method: "POST",
+        body: z.optional(
+          z.object({
+            limit: z
+              .number()
+              .int()
+              .min(1)
+              .max(MAX_RETRY_BATCH)
+              .optional()
+              .meta({
+                description: `Most referrals to retry in this call (default ${DEFAULT_RETRY_BATCH})`,
+              }),
+          }),
+        ),
+        metadata: {
+          openapi: {
+            description:
+              "Call onReferralCompleted again for completed referrals whose call failed or never finished",
+          },
+        },
+      },
+      async (ctx) => {
+        const { onReferralCompleted, rewardRetry } = options;
+        if (!onReferralCompleted) return ctx.json({ attempted: 0, rewarded: 0 });
+        const { adapter, logger } = ctx.context;
+        const before = new Date(Date.now() - rewardRetry.delay);
+        const due = await listDueRewards(adapter, {
+          before,
+          maxAttempts: rewardRetry.maxAttempts,
+          limit: ctx.body?.limit ?? DEFAULT_RETRY_BATCH,
+        });
+
+        let attempted = 0;
+        let rewarded = 0;
+        // One at a time, awaited: a cron job wants the result, not speed.
+        for (const referral of due) {
+          const claimed = await claimRewardAttempt(adapter, referral, before);
+          // null: another call of this endpoint is retrying it.
+          if (!claimed) continue;
+          attempted += 1;
+          try {
+            await onReferralCompleted(claimed);
+          } catch (error) {
+            logger.error("[referral] onReferralCompleted threw an error", error);
+            continue;
+          }
+          try {
+            await markRewarded(adapter, claimed.id);
+            rewarded += 1;
+          } catch (error) {
+            logger.error("[referral] failed to record that onReferralCompleted succeeded", error);
+          }
+        }
+        return ctx.json({ attempted, rewarded });
       },
     ),
   } satisfies BetterAuthPlugin["endpoints"];

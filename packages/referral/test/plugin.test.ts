@@ -48,6 +48,10 @@ describe("options", () => {
     expect(() => resolveOptions({ codeLength: 4 })).toThrow(/codeLength/);
     expect(() => resolveOptions({ codeLength: 8.5 })).toThrow(/codeLength/);
     expect(() => resolveOptions({ maxReferralsPerUser: 0 })).toThrow(/maxReferralsPerUser/);
+    expect(() => resolveOptions({ rewardRetry: { delay: 10 } })).toThrow(/rewardRetry.delay/);
+    expect(() => resolveOptions({ rewardRetry: { maxAttempts: 0 } })).toThrow(
+      /rewardRetry.maxAttempts/,
+    );
     expect(() => resolveOptions({ steps: ["sign-up"] })).toThrow(/sign-up/);
     expect(() => resolveOptions({ steps: ["a", "a"] })).toThrow(/twice/);
     expect(() => resolveOptions({ steps: ["has space"] })).toThrow(/Invalid step/);

@@ -91,12 +91,16 @@ export function createDatabaseHooks(
 
     let referral: Referral;
     try {
-      referral = await createReferral(adapter, {
-        referrerUserId: code.userId,
-        referredUserId: user.id,
-        code: code.code,
-        status: options.steps.length === 0 ? "completed" : "pending",
-      });
+      referral = await createReferral(
+        adapter,
+        {
+          referrerUserId: code.userId,
+          referredUserId: user.id,
+          code: code.code,
+          status: options.steps.length === 0 ? "completed" : "pending",
+        },
+        { trackReward: !!options.onReferralCompleted },
+      );
     } catch (error) {
       // Already referred (unique index): keep the first referral.
       if (await findReferralByReferredUserId(adapter, user.id)) return;
@@ -115,7 +119,7 @@ export function createDatabaseHooks(
           await deleteReferral(ctx.adapter, referral.id);
           return;
         }
-        await referralCreated(ctx, options, referral);
+        await referralCreated(ctx.adapter, ctx, options, referral);
         if (tracksEmailVerified && user.emailVerified) {
           await recordStep(ctx.adapter, ctx, options, referral, EMAIL_VERIFIED_STEP);
         }

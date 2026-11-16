@@ -19,6 +19,8 @@ export type {
   ReferralStatus,
   ReferralStep,
   ReferralWithSteps,
+  RewardRetryOptions,
+  RewardStatus,
 } from "./types";
 
 /**

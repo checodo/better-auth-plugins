@@ -62,6 +62,60 @@ jobs:
       - name: Pack, install, and run the packages in a fresh app
         run: pnpm smoke
 
+  # The concurrency tests of the waitlist and referral plugins on Postgres
+  # and MySQL (`pnpm test:db`), where requests really run in parallel and
+  # hooks run in transactions. SQLite, used by `pnpm test`, runs one
+  # statement at a time. Runs in parallel with `ci`. The services use the
+  # addresses and credentials better-auth's `getTestInstance` expects
+  # (see docker-compose.test.yml); test data only.
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql]
+    services:
+      postgres:
+        image: ${{ matrix.database == 'postgres' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user -d better_auth"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      mysql:
+        image: ${{ matrix.database == 'mysql' && 'mysql:8.4' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -proot_password"
+          --health-interval 2s --health-timeout 5s --health-retries 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Concurrency tests on ${{ matrix.database }}
+        run: pnpm test:db
+        env:
+          TEST_DATABASE: ${{ matrix.database }}
+
   # Fails a PR that changes a published package without a changeset.
   # Docs-only and tooling-only PRs pass without one. Runs while the
   # repository variable CHANGESETS_ENABLED is "true" (Settings > Secrets

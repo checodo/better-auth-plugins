@@ -1,4 +1,5 @@
 import type { BetterAuthPlugin } from "@better-auth/core";
+import { testDatabase } from "@repo/tooling/test-helpers";
 import { admin, anonymous, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
@@ -51,7 +52,7 @@ async function setup(options: WaitlistOptions = {}, extraPlugins: BetterAuthPlug
         ...extraPlugins,
       ],
     },
-    { disableTestUser: true, clientOptions: { plugins: [waitlistClient()] } },
+    { ...testDatabase(), disableTestUser: true, clientOptions: { plugins: [waitlistClient()] } },
   );
   const context = await auth.$context;
   const { test } = context;
@@ -912,6 +913,21 @@ describe("admin endpoints", () => {
 });
 
 describe("concurrent requests", () => {
+  /**
+   * Delays every adapter write, so all concurrent requests have read the
+   * entry before any of them writes: the case the conditional updates
+   * guard against. Without it, on Postgres and MySQL a request can read
+   * after another one's write and legitimately act on the new state (an
+   * approval of an approved entry renews its invite).
+   */
+  function slowWrites(context: Awaited<ReturnType<typeof setup>>["context"]) {
+    const update = context.adapter.update.bind(context.adapter);
+    vi.spyOn(context.adapter, "update").mockImplementation(async (data) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return update(data);
+    });
+  }
+
   it("resend the confirmation link once when the same email joins again at once", async () => {
     const { auth, join, confirmations, storedFor } = await setup({ confirmEmail: true });
     await join("ada@example.com");
@@ -958,12 +974,7 @@ describe("concurrent requests", () => {
     });
     await join("ada@example.com");
     const { token } = present(confirmations[0], "confirmation");
-    // Slow writes, so every request has read the entry before any writes.
-    const update = context.adapter.update.bind(context.adapter);
-    vi.spyOn(context.adapter, "update").mockImplementation(async (data) => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      return update(data);
-    });
+    slowWrites(context);
 
     const answers = await Promise.all(
       Array.from({ length: 5 }, () => auth.api.confirmWaitlistEmail({ body: { token } })),
@@ -977,9 +988,10 @@ describe("concurrent requests", () => {
   });
 
   it("send one invite when admins approve the same entry at once", async () => {
-    const { auth, join, entryFor, invites, storedFor, adminHeaders } = await setup();
+    const { auth, context, join, entryFor, invites, storedFor, adminHeaders } = await setup();
     await join("ada@example.com");
     const { id } = present(await entryFor("ada@example.com"), "entry");
+    slowWrites(context);
 
     const results = await Promise.all(
       Array.from({ length: 3 }, () =>
@@ -997,9 +1009,10 @@ describe("concurrent requests", () => {
   });
 
   it("let only one of a concurrent approval and rejection win", async () => {
-    const { auth, join, entryFor, invites, adminHeaders } = await setup();
+    const { auth, context, join, entryFor, invites, adminHeaders } = await setup();
     await join("ada@example.com");
     const { id } = present(await entryFor("ada@example.com"), "entry");
+    slowWrites(context);
 
     const [approval, rejection] = await Promise.allSettled([
       auth.api.approveWaitlistEntries({ body: { ids: [id] }, headers: adminHeaders }),

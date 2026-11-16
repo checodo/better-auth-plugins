@@ -16,6 +16,7 @@ import {
   findSlotByKey,
   findStep,
   isReferrerBlocked,
+  markRewarded,
   replaceCode,
   slotKey,
   stepsByReferral,
@@ -175,9 +176,31 @@ function recordCompleted(referral: Referral): Promise<void> {
 }
 
 /**
+ * Calls `onReferralCompleted` for a referral that was just completed, and
+ * records it as rewarded once the call returns without an error. A call
+ * that fails (or never finishes) is retried by `retryReferralRewards`.
+ */
+async function deliverReward(
+  adapter: Adapter,
+  context: Callbacks,
+  options: ResolvedReferralOptions,
+  referral: Referral,
+): Promise<void> {
+  const { onReferralCompleted } = options;
+  if (!onReferralCompleted) return;
+  await runCallback(
+    context,
+    "referral",
+    "onReferralCompleted",
+    () => onReferralCompleted(referral),
+    () => markRewarded(adapter, referral.id),
+  );
+}
+
+/**
  * Marks `referral` completed once all required steps are done. Only the
- * request whose conditional update completes it runs `onReferralCompleted`,
- * so it runs at most once; an error in it is logged, not retried.
+ * request whose conditional update completes it calls `onReferralCompleted`
+ * (see `deliverReward`).
  */
 async function completeIfDone(
   adapter: Adapter,
@@ -189,16 +212,13 @@ async function completeIfDone(
   const done = new Set((await stepsByReferral(adapter, [referral.id])).get(referral.id));
   if (!options.steps.every((step) => done.has(step))) return referral;
 
-  const completed = await completeReferral(adapter, referral.id);
+  const completed = await completeReferral(adapter, referral.id, {
+    trackReward: !!options.onReferralCompleted,
+  });
   // null: another request completed it first and runs the callback.
   if (!completed) return { ...referral, status: "completed" };
   await recordCompleted(completed);
-  const { onReferralCompleted } = options;
-  if (onReferralCompleted) {
-    await runCallback(context, "referral", "onReferralCompleted", () =>
-      onReferralCompleted(completed),
-    );
-  }
+  await deliverReward(adapter, context, options, completed);
   return completed;
 }
 
@@ -243,6 +263,7 @@ export async function recordStep(
  * if it was created completed (no steps required).
  */
 export async function referralCreated(
+  adapter: Adapter,
   context: Callbacks,
   options: ResolvedReferralOptions,
   referral: Referral,
@@ -258,11 +279,7 @@ export async function referralCreated(
     },
   });
   if (referral.status === "completed") await recordCompleted(referral);
-  const { onReferral, onReferralCompleted } = options;
+  const { onReferral } = options;
   if (onReferral) await runCallback(context, "referral", "onReferral", () => onReferral(referral));
-  if (referral.status === "completed" && onReferralCompleted) {
-    await runCallback(context, "referral", "onReferralCompleted", () =>
-      onReferralCompleted(referral),
-    );
-  }
+  if (referral.status === "completed") await deliverReward(adapter, context, options, referral);
 }
