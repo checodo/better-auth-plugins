@@ -64,6 +64,45 @@ describe("blocklist", () => {
     ]);
   });
 
+  it("never records a blocked password, not even as the matched rule's value", async () => {
+    // The blocklist stores the attempt under `value` and `rule.value`,
+    // which the key-based redaction can't recognize as secrets: the
+    // blocklist has to redact them itself.
+    const storage = memoryStorage();
+    const { auth } = await getTestInstance(
+      {
+        plugins: [
+          blocklist({
+            password: { values: ["password123", { value: "hunter", type: "contains" }] },
+          }),
+          auditLog({ storage }),
+        ],
+      },
+      { disableTestUser: true },
+    );
+    // The last one contains the email's local part, for the context check,
+    // which ignores words shorter than four characters.
+    const attempts = ["password123", "Hunter-and-more", "jane-2024!"];
+    for (const password of attempts) {
+      await expect(
+        auth.api.signUpEmail({ body: { email: "jane@example.com", password, name: "Jane" } }),
+      ).rejects.toThrow();
+    }
+
+    const blocked = storage.events.filter((event) => event.type === "blocklist.blocked");
+    expect(blocked.map((event) => event.metadata)).toEqual([
+      { target: "password", value: "[redacted]", rule: { type: "exact", value: "[redacted]" } },
+      { target: "password", value: "[redacted]", rule: { type: "contains", value: "[redacted]" } },
+      // The context check names where the word came from, not the password.
+      { target: "password", value: "[redacted]", rule: { type: "contains", value: "[email]" } },
+    ]);
+    // Nothing anywhere in the log, in any event, contains an attempt.
+    const stored = JSON.stringify(storage.events).toLowerCase();
+    for (const secret of ["password123", "hunter", "jane-2024"]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
   it("records rules an admin creates and deletes", async () => {
     const { auth, createUser, events } = await setup();
     const { user: root, headers } = await createUser("root@example.com", "admin");
