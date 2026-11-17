@@ -156,9 +156,13 @@ export function renderIndexPage(packages: PackageChangelog[]): string {
   ].join("\n");
 }
 
-/** The folder's `meta.json`: the overview first, then the plugins. */
+/**
+ * The folder's `meta.json`: the plugins. The overview (`index`) is left
+ * out, so the folder title itself links to it, like Authentication's;
+ * listed, it would appear a second time as "Changelog" inside the folder.
+ */
 export function renderMeta(packages: PackageChangelog[]): string {
-  const meta = { title: "Changelog", pages: ["index", ...packages.map((p) => p.dir)] };
+  const meta = { title: "Changelog", pages: packages.map((p) => p.dir) };
   return `${JSON.stringify(meta, null, 2)}\n`;
 }
 

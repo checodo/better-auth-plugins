@@ -89,10 +89,10 @@ describe("changelog pages", () => {
     expect(page).toContain('description="@checodo/better-auth-waitlist 0.3.0"');
   });
 
-  it("orders the sidebar: overview first, then the plugins", () => {
+  it("lists the plugins in the sidebar; the folder title links to the overview", () => {
     expect(JSON.parse(renderMeta([waitlist]))).toEqual({
       title: "Changelog",
-      pages: ["index", "waitlist"],
+      pages: ["waitlist"],
     });
   });
 
