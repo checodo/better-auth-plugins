@@ -111,7 +111,10 @@ export async function resetTestDatabase(context: ResettableContext): Promise<voi
 export function totp(base32: string, at = Date.now()): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = "";
-  for (const char of base32.replace(/=+$/, "").toUpperCase()) {
+  // Strip the "=" padding without a regular expression (a `/=+$/` backtracks on long runs).
+  let end = base32.length;
+  while (end > 0 && base32[end - 1] === "=") end -= 1;
+  for (const char of base32.slice(0, end).toUpperCase()) {
     bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
   }
   const key = Buffer.from((bits.match(/.{8}/g) ?? []).map((byte) => Number.parseInt(byte, 2)));
