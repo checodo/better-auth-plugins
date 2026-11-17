@@ -62,19 +62,21 @@ jobs:
       - name: Pack, install, and run the packages in a fresh app
         run: pnpm smoke
 
-  # The concurrency tests of the waitlist and referral plugins on Postgres
-  # and MySQL (`pnpm test:db`), where requests really run in parallel and
-  # hooks run in transactions. SQLite, used by `pnpm test`, runs one
-  # statement at a time. Runs in parallel with `ci`. The services use the
-  # addresses and credentials better-auth's `getTestInstance` expects
-  # (see docker-compose.test.yml); test data only.
+  # The concurrency tests of the waitlist and referral plugins on Postgres,
+  # MySQL and MongoDB (`pnpm test:db`), where requests really run in
+  # parallel. On Postgres and MySQL hooks run in transactions; MongoDB has
+  # no foreign keys and (on a single server) no transactions, and makes its
+  # own unique indexes. SQLite, used by `pnpm test`, runs one statement at
+  # a time. Runs in parallel with `ci`. The services use the addresses and
+  # credentials better-auth's `getTestInstance` expects (see
+  # docker-compose.test.yml); test data only.
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        database: [postgres, mysql]
+        database: [postgres, mysql, mongodb]
     services:
       postgres:
         image: ${{ matrix.database == 'postgres' && 'postgres:17' || '' }}
@@ -96,6 +98,13 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -proot_password"
           --health-interval 2s --health-timeout 5s --health-retries 60
+      mongodb:
+        image: ${{ matrix.database == 'mongodb' && 'mongo:8' || '' }}
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 2s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,6 +124,53 @@ jobs:
         run: pnpm test:db
         env:
           TEST_DATABASE: ${{ matrix.database }}
+
+  # The packages declare better-auth and @better-auth/core as peers from the
+  # catalog's lowest version on (`^1.7.20` in pnpm-workspace.yaml), but the
+  # lockfile installs the newest. This job tests them against exactly that
+  # lowest version, so a plugin can't use a newer API unnoticed. If it fails
+  # because a newer API is needed, raise the catalog range on purpose (the
+  # peer range follows; needs a changeset). The changed lockfile stays in
+  # this job. Runs in parallel with `ci`.
+  lowest-better-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Pin better-auth to the lowest supported version
+        run: |
+          min="$(sed -n 's/^  better-auth: \^//p' pnpm-workspace.yaml)"
+          if [ -z "$min" ]; then
+            echo "::error::No better-auth range in the catalog (pnpm-workspace.yaml)"
+            exit 1
+          fi
+          printf '\noverrides:\n  better-auth: %s\n  "@better-auth/core": %s\n' "$min" "$min" >> pnpm-workspace.yaml
+          echo "MIN_BETTER_AUTH=$min" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Check that only the lowest version is installed
+        run: |
+          installed="$(ls node_modules/.pnpm | grep -oE '^(better-auth|@better-auth\+core)@[0-9][^_]*' | sort -u)"
+          echo "$installed"
+          if [ -z "$installed" ] || echo "$installed" | grep -qv "@$MIN_BETTER_AUTH\$"; then
+            echo "::error::Expected only better-auth and @better-auth/core $MIN_BETTER_AUTH"
+            exit 1
+          fi
+
+      - name: Typecheck and test the packages
+        run: pnpm turbo run typecheck test --filter='./packages/*'
 
   # Fails a PR that changes a published package without a changeset.
   # Docs-only and tooling-only PRs pass without one. Runs while the

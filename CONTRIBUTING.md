@@ -40,7 +40,7 @@ pnpm check            # versions, docs, lint, typecheck, test, build, package ch
 pnpm smoke            # pack every package, install it into a fresh app from npm, type-check and run it
 pnpm build            # turbo run build
 pnpm test             # turbo run test
-pnpm test:db          # concurrency tests on Postgres or MySQL (see "Testing")
+pnpm test:db          # concurrency tests on Postgres, MySQL or MongoDB (see "Testing")
 pnpm typecheck        # turbo run typecheck
 pnpm lint             # biome check . --error-on-warnings
 pnpm lint:fix         # biome check --write . (lint fixes and formatting)
@@ -110,9 +110,10 @@ turbo.json         makes `dev` wait for `build` (see "When adding a new plugin")
 
 Plugins target the latest `better-auth` / `@better-auth/core` release.
 The pnpm catalog holds the one version range, and every package uses it
-with `catalog:` for both the peer and the dev dependency, so the version
-we test against is the lowest version we support (pnpm writes the real
-range into the published `package.json`). A `better-auth` bump in the
+with `catalog:` for both the peer and the dev dependency (pnpm writes the
+real range into the published `package.json`). The lockfile installs the
+newest release in that range; CI's `lowest-better-auth` job also tests
+the packages against the range's lowest version. A `better-auth` bump in the
 catalog therefore raises the supported minimum too; update the
 Requirements line in `apps/docs/content/docs/index.mdx` in the same change
 (`pnpm check` fails if it doesn't match). The notes below were verified
@@ -291,14 +292,17 @@ How it works:
   hope.
 - SQLite runs one statement at a time, so a race that depends on the
   database (a conditional update, a unique key, a transaction committing
-  late) also runs on Postgres and MySQL: `pnpm test:db` runs the tests of
+  late) also runs on Postgres, MySQL and MongoDB: `pnpm test:db` runs the tests of
   the waitlist and referral plugins whose name contains "concurrent",
   "race", "out of order", or "at once", with `TEST_DATABASE` set.
   `getTestInstance` connects to fixed addresses; start them with
   `docker compose -f docker-compose.test.yml up -d --wait`, then run
-  `TEST_DATABASE=postgres pnpm test:db` and `TEST_DATABASE=mysql pnpm test:db`.
-  A new setup that should run there spreads `testDatabase()` from
-  `@repo/tooling/test-helpers` into `getTestInstance`'s second argument.
+  `TEST_DATABASE=postgres pnpm test:db`, `TEST_DATABASE=mysql pnpm test:db`,
+  and `TEST_DATABASE=mongodb pnpm test:db`. A new setup that should run
+  there spreads `testDatabase()` from `@repo/tooling/test-helpers` into
+  `getTestInstance`'s second argument, and calls `resetTestDatabase` with
+  the instance's context right after (MongoDB keeps one database per test
+  file).
 - Maintenance scripts keep their logic in importable modules (the script
   itself runs on import) and are unit-tested; network access is replaced
   by fakes, such as the fake DNS resolver in `test/scripts.test.ts`.
@@ -396,10 +400,11 @@ Trunk-based development: `main` plus short-lived feature branches.
 ### Branch protection (GitHub settings, once CI is on)
 
 - Require a pull request before merging; allow **squash merge only**.
-- Require the `CI / ci`, `CI / database (postgres)`, and
-  `CI / database (mysql)` status checks to pass. The `database` checks
-  can only be selected once the job has run, for example on the pull
-  request that adds them. Not `CI / changeset`: the "Version Packages"
+- Require the `CI / ci`, `CI / database (postgres)`,
+  `CI / database (mysql)`, `CI / database (mongodb)`, and
+  `CI / lowest-better-auth` status checks to pass. A check can only be
+  selected once its job has run, for example on the pull request that
+  adds it. Not `CI / changeset`: the "Version Packages"
   pull request removes the changesets and would fail it.
 - Require branches to be up to date before merging.
 - Block force pushes and deletion of `main`.
@@ -412,8 +417,13 @@ Trunk-based development: `main` plus short-lived feature branches.
 `.github/workflows/ci.yml` runs on every push to `main` and every pull
 request: the same steps as `pnpm check`, plus `pnpm smoke`. Its token can
 only read the repository, and a run stops after 20 minutes. Its
-`database` job runs `pnpm test:db` on Postgres and on MySQL, in parallel
-with the rest.
+`database` job runs `pnpm test:db` on Postgres, MySQL and MongoDB, and
+its `lowest-better-auth` job runs the packages' typecheck and tests
+against the lowest supported `better-auth` (the catalog range's minimum,
+pinned with a pnpm override for that job only), both in parallel with the
+rest. When `lowest-better-auth` fails because a plugin needs a newer API,
+raise the catalog range on purpose (with a changeset) rather than
+working around it.
 
 Its `changeset` job fails a pull request that changes a published
 package without a changeset. It runs while the repository variable

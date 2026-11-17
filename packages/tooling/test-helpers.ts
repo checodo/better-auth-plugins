@@ -63,15 +63,43 @@ export async function signInWithWallet(
 /**
  * Where `getTestInstance` keeps its data, from `TEST_DATABASE`: SQLite in
  * memory when unset (the default for `pnpm test`), or `postgres` / `mysql`
- * on the servers better-auth's test helper expects (see `docker-compose.test.yml`),
- * with transactions on, so hooks run in real transactions. Spread into
- * the second argument of `getTestInstance`.
+ * / `mongodb` on the servers better-auth's test helper expects (see
+ * `docker-compose.test.yml`). Postgres and MySQL run with transactions
+ * on, so hooks run in real transactions; MongoDB without (a single server
+ * has none, like most MongoDB setups the adapter sees). Spread into the
+ * second argument of `getTestInstance`.
  */
-export function testDatabase(): { testWith?: "postgres" | "mysql"; transaction?: boolean } {
+export function testDatabase(): {
+  testWith?: "postgres" | "mysql" | "mongodb";
+  transaction?: boolean;
+} {
   const database = process.env.TEST_DATABASE;
   if (!database || database === "sqlite") return {};
   if (database === "postgres" || database === "mysql") {
     return { testWith: database, transaction: true };
   }
-  throw new Error(`TEST_DATABASE must be "sqlite", "postgres", or "mysql", got "${database}".`);
+  if (database === "mongodb") return { testWith: database };
+  throw new Error(
+    `TEST_DATABASE must be "sqlite", "postgres", "mysql", or "mongodb", got "${database}".`,
+  );
+}
+
+/** The part of better-auth's `AuthContext` that `resetTestDatabase` uses. */
+interface ResettableContext {
+  tables: Record<string, unknown>;
+  adapter: { deleteMany: (input: { model: string; where: [] }) => Promise<number> };
+}
+
+/**
+ * Empties every table of a fresh test instance on MongoDB, and does
+ * nothing on the other databases. `getTestInstance` gives each instance
+ * its own Postgres schema or MySQL database, but one MongoDB database per
+ * test file, so rows of earlier tests (users with the same email) would
+ * still be there. Call it right after `getTestInstance`.
+ */
+export async function resetTestDatabase(context: ResettableContext): Promise<void> {
+  if (process.env.TEST_DATABASE !== "mongodb") return;
+  for (const model of Object.keys(context.tables)) {
+    await context.adapter.deleteMany({ model, where: [] });
+  }
 }

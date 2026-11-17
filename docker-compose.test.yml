@@ -1,11 +1,12 @@
 # Databases for `pnpm test:db`: the concurrency tests of the waitlist and
-# referral plugins on Postgres and MySQL, which (unlike SQLite) run
+# referral plugins on Postgres, MySQL and MongoDB, which (unlike SQLite) run
 # requests in parallel. better-auth's `getTestInstance` connects to these
 # exact addresses and credentials. Test data only; never expose the ports.
 #
 #   docker compose -f docker-compose.test.yml up -d --wait
 #   TEST_DATABASE=postgres pnpm test:db
 #   TEST_DATABASE=mysql pnpm test:db
+#   TEST_DATABASE=mongodb pnpm test:db
 #   docker compose -f docker-compose.test.yml down
 services:
   postgres:
@@ -32,3 +33,12 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+  mongodb:
+    image: mongo:8
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
