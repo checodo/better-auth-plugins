@@ -1,6 +1,11 @@
-import type { BlocklistMatchType, BlocklistRule, BlocklistTarget, CompiledRule } from "../types";
-import type { IpNetwork } from "./ip";
-import { canonicalCidr, canonicalIp, isInNetwork, parseCidr, parseIp } from "./ip";
+import { canonicalCidr, canonicalIp, isInNetwork, parseCidr, parseIp } from "@repo/plugin-utils/ip";
+import type {
+  BlocklistMatchType,
+  BlocklistRule,
+  BlocklistTarget,
+  CompiledRule,
+  IpNetwork,
+} from "../types";
 import { normalizeDomain, normalizeEmail, normalizeValue } from "./normalize";
 import { foldLeetspeak } from "./password";
 

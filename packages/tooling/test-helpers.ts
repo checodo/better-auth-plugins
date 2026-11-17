@@ -1,8 +1,11 @@
+import { createHmac } from "node:crypto";
+
 /**
  * Test helpers shared by the plugins: the database `getTestInstance`
  * uses (`testDatabase`), and, for `official-plugins.test.ts`, official
  * better-auth plugins whose flows take more than a call: Sign-In with
- * Ethereum (SIWE). No better-auth import: the types below describe only
+ * Ethereum (SIWE), and the codes of the two-factor plugin (TOTP). No
+ * better-auth import: the types below describe only
  * what the helpers use.
  */
 
@@ -102,4 +105,23 @@ export async function resetTestDatabase(context: ResettableContext): Promise<voi
   for (const model of Object.keys(context.tables)) {
     await context.adapter.deleteMany({ model, where: [] });
   }
+}
+
+/** RFC 6238 TOTP (SHA-1, 6 digits, 30 s) for a base32 secret, as authenticator apps compute it. */
+export function totp(base32: string, at = Date.now()): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  // Strip the "=" padding without a regular expression (a `/=+$/` backtracks on long runs).
+  let end = base32.length;
+  while (end > 0 && base32[end - 1] === "=") end -= 1;
+  for (const char of base32.slice(0, end).toUpperCase()) {
+    bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
+  }
+  const key = Buffer.from((bits.match(/.{8}/g) ?? []).map((byte) => Number.parseInt(byte, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 1000 / 30)));
+  const hmac = createHmac("sha1", key).update(counter).digest();
+  const offset = (hmac[hmac.length - 1] ?? 0) & 0xf;
+  const code = (hmac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+  return code.toString().padStart(6, "0");
 }

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  canonicalCidr,
-  canonicalIp,
-  formatIp,
-  isInNetwork,
-  parseCidr,
-  parseIp,
-} from "../src/utils/ip";
+import { canonicalCidr, canonicalIp, formatIp, isInNetwork, parseCidr, parseIp } from "../src/ip";
 
 describe("parseIp / canonicalIp", () => {
   it("parses IPv4", () => {

@@ -1,7 +1,6 @@
 import type { InferOptionSchema } from "better-auth";
 import type { BlocklistSchema } from "./schema";
 import type { DatabaseRuleCache } from "./utils/database-rule-cache";
-import type { IpNetwork } from "./utils/ip";
 import type { RuleSet } from "./utils/rule-set";
 
 /** The kinds of values the blocklist guards. */
@@ -88,9 +87,10 @@ export interface BlocklistEmailOptions extends BlocklistTargetOptions {
 export interface BlocklistPasswordOptions extends Omit<BlocklistTargetOptions, "allow"> {
   /**
    * Also block passwords that contain the user's email address (its local
-   * part), username, or the app name (`appName`), like NIST SP 800-63B
-   * asks for "context-specific words". Words shorter than 4 characters are
-   * ignored. Defaults to `true`.
+   * part), username, or the app name (`appName`). Compares parts of the
+   * password, so it is stricter than NIST SP 800-63B's whole-password
+   * blocklist. Words shorter than 4 characters are ignored. Defaults to
+   * `true`.
    */
   checkContext?: boolean | undefined;
 }
@@ -220,6 +220,16 @@ export interface ResolvedBlocklistOptions {
   };
   /** Compiled database rules per target, see `databaseCacheTtl`. */
   databaseRules: DatabaseRuleCache;
+}
+
+/**
+ * A parsed CIDR range: the network address (host bits cleared) and its
+ * prefix length. Declared here, not imported from the shared IP helpers,
+ * so the published types don't refer to an unpublished package.
+ */
+export interface IpNetwork {
+  bytes: Uint8Array;
+  prefix: number;
 }
 
 /**

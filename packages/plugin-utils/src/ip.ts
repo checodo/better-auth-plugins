@@ -1,6 +1,7 @@
 /**
- * IP address and CIDR range parsing for the `ip` target. Written here, not
- * imported from `node:net`, so the plugin keeps working on edge runtimes.
+ * IP address and CIDR range parsing (the blocklist's `ip` target, coarse
+ * networks for security alerts). Written here, not imported from
+ * `node:net`, so the plugins keep working on edge runtimes.
  * IPv4-mapped IPv6 addresses (`::ffff:192.0.2.1`) are treated as the IPv4
  * address they carry, like better-auth's own IP handling.
  */
