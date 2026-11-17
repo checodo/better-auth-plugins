@@ -335,6 +335,56 @@ describe("attribution", () => {
     expect(await context.adapter.count({ model: "referralSlot" })).toBe(2);
   });
 
+  it("holds a lowered maxReferralsPerUser when sign-ups race for the freed places", async () => {
+    // Five places under a limit of 5, then the referred users of places
+    // 0-2 are deleted: places 3 and 4 stay. The limit is lowered to 3,
+    // and two sign-ups settle at once while one place is left.
+    const { context, referrer, createUser } = await setup({ maxReferralsPerUser: 5 });
+    const ada = await referrer();
+    const make = async (email: string) => {
+      const { user } = await createUser(email);
+      return context.adapter.create<Omit<Referral, "id">, Referral>({
+        model: "referral",
+        data: {
+          referrerUserId: ada.user.id,
+          referredUserId: user.id,
+          code: ada.code,
+          status: "pending",
+          completedAt: null,
+          createdAt: new Date(),
+        },
+      });
+    };
+    const first: Referral[] = [];
+    for (const name of ["bob", "carol", "dan", "eve", "fay"]) {
+      const one = await make(`${name}@example.com`);
+      expect(await claimReferralPlace(context.adapter, 5, one)).toBe(true);
+      first.push(one);
+    }
+    const remove = async (gone: Referral) => {
+      await context.adapter.deleteMany({
+        model: "referralSlot",
+        where: [{ field: "referralId", value: gone.id }],
+      });
+      await context.adapter.delete({ model: "referral", where: [{ field: "id", value: gone.id }] });
+    };
+    for (const gone of first.slice(0, 3)) await remove(gone);
+
+    const racing = [await make("gus@example.com"), await make("hal@example.com")];
+    const kept = await Promise.all(
+      racing.map((one) => claimReferralPlace(context.adapter, 3, one)),
+    );
+    // At worst both lose the last place (like any race for it), never both get it.
+    expect(kept.filter(Boolean).length).toBeLessThanOrEqual(1);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBeLessThanOrEqual(3);
+
+    // Without the other sign-up, the last place can still be taken.
+    const [gus, hal] = racing as [Referral, Referral];
+    await remove(hal);
+    if (!kept[0]) expect(await claimReferralPlace(context.adapter, 3, gus)).toBe(true);
+    expect(await context.adapter.count({ model: "referralSlot" })).toBe(3);
+  });
+
   it("counts maxReferralsPerUser across codes: a new code doesn't reset it", async () => {
     const { auth, referrer, signUp, referralOf } = await setup({ maxReferralsPerUser: 1 });
     const ada = await referrer();
