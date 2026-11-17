@@ -32,6 +32,11 @@ describe("parseUserAgent", () => {
     expect(parseUserAgent(UA.edgeWindows)).toEqual({ browser: "Edge", os: "Windows" });
     expect(parseUserAgent(UA.firefoxLinux)).toEqual({ browser: "Firefox", os: "Linux" });
     expect(parseUserAgent(UA.safariIphone)).toEqual({ browser: "Safari", os: "iOS" });
+    expect(
+      parseUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+      ),
+    ).toEqual({ browser: "Safari", os: "macOS" });
     expect(parseUserAgent(UA.chromeIphone)).toEqual({ browser: "Chrome", os: "iOS" });
     expect(parseUserAgent(UA.samsungAndroid)).toEqual({
       browser: "Samsung Internet",

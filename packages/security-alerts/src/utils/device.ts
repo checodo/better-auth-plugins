@@ -18,7 +18,9 @@ const BROWSERS: Family[] = [
   { name: "Yandex", test: /\bYaBrowser\// },
   { name: "Firefox", test: /\b(?:Firefox|FxiOS)\// },
   { name: "Chrome", test: /\b(?:Chrome|CriOS|Chromium)\// },
-  { name: "Safari", test: /\bVersion\/[\d.]+.*\bSafari\// },
+  // "Version/17.5 Safari/…" (macOS) or "Version/17.5 Mobile/15E148 Safari/…" (iOS);
+  // written without `.*`, so it matches in linear time.
+  { name: "Safari", test: /\bVersion\/[\d.]+ (?:Mobile\/\w+ )?Safari\// },
 ];
 
 /** Systems, most specific first: iOS and Android also mention "Mac OS X" and "Linux". */
