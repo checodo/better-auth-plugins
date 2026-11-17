@@ -507,8 +507,8 @@ once by the maintainer, without a token, through npm's staged publishing.
 (The release workflow stops with an error pointing here if a package
 isn't on npm yet.)
 
-Locally, with Node 24 (`nvm use`: npm 11.15 or newer has `npm stage` and
-`npm trust`), signed in with the maintainer's npm account (`npm login`,
+Locally, with Node 24 (`nvm use` in the repository, `nvm use 24`
+elsewhere: npm 11.15 or newer has `npm stage` and `npm trust`), signed in with the maintainer's npm account (`npm login`,
 2FA in the browser):
 
 1. Create the package by staging a throwaway placeholder, in an empty
@@ -531,21 +531,45 @@ Locally, with Node 24 (`nvm use`: npm 11.15 or newer has `npm stage` and
    ```
 
    `npm trust list @checodo/better-auth-<name>` shows it ("publish, stage
-   publish"). Then npmjs.com > the package > **Settings > Publishing
-   access**: "Require two-factor authentication and disallow bypass 2fa
-   tokens".
+   publish"). Or on npmjs.com > the package > **Settings > Trusted
+   Publisher**: GitHub Actions, `checodo` / `better-auth-plugins`,
+   workflow `release.yml`, environment `npm`, **Allow `npm publish`**
+   checked (npm calls it "not recommended" because it prefers staged
+   publishing, but the release workflow publishes directly), `npm
+   dist-tag` unchecked. These fields can't be changed later: a typo means
+   deleting the connection and creating it again. Then **Settings >
+   Publishing access**: "Require two-factor authentication and disallow
+   bypass 2fa tokens".
 3. **Release within 2 days**: npm drops a trust setup that nothing has
    published through within 2 days. Merge the "Version Packages" pull
    request with the new package's first version soon after step 2. If
    it expired, run step 2 again.
-4. After the first release: reject the staged placeholder
-   (`npm stage list`, then `npm stage reject <stage-id>`, or **Staged
-   Packages** on npmjs.com), deprecate npm's placeholder, then
+4. Right after the first release, remove the placeholders, then
    `npm logout`:
+   - The staged `0.0.1-bootstrap`: `npm stage list`, then
+     `npm stage reject <stage-id>` (or **Staged Packages** on
+     npmjs.com). After the release it is usually gone already ("No
+     staged packages found").
+   - npm's public `0.0.0-stage`: unpublish it, **with the version**
+     (without it, `npm unpublish` means the whole package):
 
-   ```bash
-   npm deprecate @checodo/better-auth-<name>@0.0.0-stage "Placeholder from npm's package creation, not a release."
-   ```
+     ```bash
+     npm unpublish @checodo/better-auth-<name>@0.0.0-stage
+     ```
+
+     The registry drops the version at once; the versions tab on
+     npmjs.com can keep showing it for a while (cached pages).
+
+     npm only allows this within 72 hours of creating the package, and
+     only while no other published package depends on this one, which
+     includes the `devDependencies` of our own packages (a plugin whose
+     tests use another one lists it there). So do it before another
+     package lists the new one. If npm refuses (`E405`, "has dependent
+     packages in the registry"), deprecate the placeholder instead:
+
+     ```bash
+     npm deprecate @checodo/better-auth-<name>@0.0.0-stage "Placeholder from npm's package creation, not a release."
+     ```
 
 The real first version is published by the release workflow, with
 provenance, like every later one.
