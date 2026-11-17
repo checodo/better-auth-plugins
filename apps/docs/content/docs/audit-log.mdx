@@ -254,6 +254,7 @@ don't depend on it.
 | `blocklist.rule-deleted` | Blocklist                      | An admin deletes a rule                                | high     |
 | `referral.created`       | [Referral](/docs/referral)     | A user signs up with a referral code (`userId`: the new user) | low |
 | `referral.completed`     | Referral                       | A referral completes (`userId`: the referrer it rewards) | medium |
+| `referral.reward-failed` | Referral                       | `onReferralCompleted` threw on its last attempt (`rewardRetry.maxAttempts`), so the reward isn't retried (`status: "failure"`, no actor, `userId`: the referrer). `metadata`: `referralId`, `referredUserId`, `attempts` | high |
 | `waitlist.confirmed`     | [Waitlist](/docs/waitlist)     | Someone confirms their email through the link (no actor). `metadata.email` | low |
 | `waitlist.approved`      | Waitlist                       | An entry is approved, by an admin or `autoApprove` (no actor). `metadata.email` | medium |
 | `waitlist.rejected`      | Waitlist                       | An admin rejects an entry                              | medium   |

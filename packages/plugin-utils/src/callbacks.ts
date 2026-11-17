@@ -9,6 +9,8 @@ import type { AuthContext } from "@better-auth/core";
  *
  * `onSuccess` runs after the callback returned without an error (in the
  * same task, so also in the background), e.g. to record that a reward was
+ * delivered. Its errors are logged too. `onError` runs after the callback
+ * threw and its error was logged, e.g. to report a reward that can't be
  * delivered. Its errors are logged too.
  */
 export async function runCallback(
@@ -17,12 +19,18 @@ export async function runCallback(
   name: string,
   callback: () => void | Promise<void>,
   onSuccess?: () => void | Promise<void>,
+  onError?: () => void | Promise<void>,
 ): Promise<void> {
   const task = (async () => {
     try {
       await callback();
     } catch (error) {
       context.logger.error(`[${pluginId}] ${name} threw an error`, error);
+      try {
+        await onError?.();
+      } catch (onErrorError) {
+        context.logger.error(`[${pluginId}] failed to handle the error of ${name}`, onErrorError);
+      }
       return;
     }
     if (!onSuccess) return;

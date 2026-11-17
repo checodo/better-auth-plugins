@@ -5,7 +5,7 @@ import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api
 import * as z from "zod";
 import { REFERRAL_ERROR_CODES } from "../error-codes";
 import { MAX_STEP_LENGTH } from "../options";
-import { recordStep } from "../referrals";
+import { recordRewardFailed, recordStep } from "../referrals";
 import {
   claimRewardAttempt,
   countReferrals,
@@ -238,6 +238,7 @@ export function createReferralEndpoints(options: ResolvedReferralOptions) {
             await onReferralCompleted(claimed);
           } catch (error) {
             logger.error("[referral] onReferralCompleted threw an error", error);
+            await recordRewardFailed(options, claimed);
             continue;
           }
           try {

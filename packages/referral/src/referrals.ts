@@ -178,6 +178,28 @@ function recordCompleted(referral: Referral): Promise<void> {
 }
 
 /**
+ * Records in the audit log that `onReferralCompleted` failed for the last
+ * time: after `rewardRetry.maxAttempts` calls, the referral isn't retried,
+ * and its reward is never granted unless someone steps in. Once per
+ * referral: only one caller makes each attempt (see `claimRewardAttempt`).
+ */
+export async function recordRewardFailed(
+  options: Pick<ResolvedReferralOptions, "rewardRetry">,
+  referral: Referral,
+): Promise<void> {
+  const attempts = referral.rewardAttempts ?? 0;
+  if (attempts < options.rewardRetry.maxAttempts) return;
+  await recordAuditEvent({
+    type: "referral.reward-failed",
+    status: "failure",
+    severity: "high",
+    userId: referral.referrerUserId,
+    actorUserId: null,
+    metadata: { referralId: referral.id, referredUserId: referral.referredUserId, attempts },
+  });
+}
+
+/**
  * Calls `onReferralCompleted` for a referral that was just completed, and
  * records it as rewarded once the call returns without an error. A call
  * that fails (or never finishes) is retried by `retryReferralRewards`.
@@ -196,6 +218,7 @@ async function deliverReward(
     "onReferralCompleted",
     () => onReferralCompleted(referral),
     () => markRewarded(adapter, referral.id),
+    () => recordRewardFailed(options, referral),
   );
 }
 

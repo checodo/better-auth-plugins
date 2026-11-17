@@ -72,6 +72,40 @@ describe("runCallback", () => {
     expect(failed).not.toHaveBeenCalled();
   });
 
+  it("runs onError only after the callback threw, and logs its errors", async () => {
+    const ctx = context(false);
+    const onError = vi.fn();
+    await runCallback(
+      ctx as never,
+      "referral",
+      "onReferralCompleted",
+      async () => {},
+      undefined,
+      onError,
+    );
+    expect(onError).not.toHaveBeenCalled();
+
+    const error = new Error("audit down");
+    await expect(
+      runCallback(
+        ctx as never,
+        "referral",
+        "onReferralCompleted",
+        () => {
+          throw new Error("boom");
+        },
+        undefined,
+        () => {
+          throw error;
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(ctx.logger.error).toHaveBeenLastCalledWith(
+      "[referral] failed to handle the error of onReferralCompleted",
+      error,
+    );
+  });
+
   it("logs errors of onSuccess and never throws", async () => {
     const ctx = context(false);
     const error = new Error("db down");

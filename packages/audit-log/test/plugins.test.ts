@@ -266,6 +266,79 @@ describe("referral", () => {
   });
 });
 
+describe("referral rewards", () => {
+  /** A referred user with one step left, with `onReferralCompleted` always failing. */
+  async function failingReward(maxAttempts: number) {
+    const storage = memoryStorage();
+    const { auth } = await getTestInstance(
+      {
+        plugins: [
+          referral({
+            steps: ["first-purchase"],
+            onReferralCompleted: () => {
+              throw new Error("reward service down");
+            },
+            rewardRetry: { delay: 60_000, maxAttempts },
+          }),
+          testUtils(),
+          auditLog({ storage }),
+        ],
+      },
+      { disableTestUser: true },
+    );
+    const context = await auth.$context;
+    vi.spyOn(context.logger, "error").mockImplementation(() => {});
+    const ada = await context.test.saveUser(context.test.createUser({ email: "ada@example.com" }));
+    const { code } = await auth.api.createReferralCode({
+      headers: await context.test.getAuthHeaders({ userId: ada.id }),
+    });
+    const { user: bob } = await auth.api.signUpEmail({
+      body: { email: "bob@example.com", password: PASSWORD, name: "Bob" },
+      headers: new Headers({ "x-referral-code": code }),
+    });
+    const finish = () =>
+      auth.api.completeReferralStep({ body: { userId: bob.id, step: "first-purchase" } });
+    /** Retries with `Date` moved `minutes` ahead. */
+    const retryLater = async (minutes: number, times = 1) => {
+      vi.useFakeTimers({ now: Date.now() + minutes * 60_000, toFake: ["Date"] });
+      try {
+        await Promise.all(Array.from({ length: times }, () => auth.api.retryReferralRewards({})));
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    const failed = () => storage.events.filter((event) => event.type === "referral.reward-failed");
+    return { ada, bob, finish, retryLater, failed };
+  }
+
+  it("records a reward that failed for the last time, for the referrer", async () => {
+    const { ada, bob, finish, failed } = await failingReward(1);
+    await finish();
+    expect(failed()).toEqual([
+      expect.objectContaining({
+        status: "failure",
+        severity: "high",
+        userId: ada.id,
+        actorUserId: null,
+        metadata: expect.objectContaining({ referredUserId: bob.id, attempts: 1 }),
+      }),
+    ]);
+  });
+
+  it("records nothing while attempts are left, and once after the last retry", async () => {
+    const { finish, retryLater, failed } = await failingReward(3);
+    await finish();
+    await retryLater(2);
+    expect(failed()).toEqual([]);
+    // The last attempt, from concurrent retries, then nothing left to retry.
+    await retryLater(4, 3);
+    await retryLater(6);
+    expect(failed()).toEqual([
+      expect.objectContaining({ metadata: expect.objectContaining({ attempts: 3 }) }),
+    ]);
+  });
+});
+
 describe("options", () => {
   it("apply to events from other plugins", async () => {
     const { auth, events } = await setup({ events: ["sign-up"] });
