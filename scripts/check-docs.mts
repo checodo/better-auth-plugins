@@ -27,12 +27,22 @@ interface PluginDocs {
   pages: string[];
   /** The type of the plugin function's options. */
   options: string;
+  /**
+   * More option types from `src/types.ts` documented in the Options
+   * section, e.g. of list entries or helpers the package exports.
+   */
+  extraOptions?: string[];
   /** Options deliberately documented in prose instead of a table. */
   documentedInProse?: string[];
 }
 
 const PLUGINS: PluginDocs[] = [
-  { dir: "audit-log", pages: ["audit-log.mdx"], options: "AuditLogOptions" },
+  {
+    dir: "audit-log",
+    pages: ["audit-log.mdx"],
+    options: "AuditLogOptions",
+    extraOptions: ["AuditLogDestination", "HttpDestinationOptions"],
+  },
   {
     dir: "authentication",
     pages: [
@@ -62,6 +72,7 @@ const STATUS_CODES: Record<string, number> = {
   UNPROCESSABLE_ENTITY: 422,
   TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER_ERROR: 500,
+  NOT_IMPLEMENTED: 501,
 };
 
 const errors: string[] = [];
@@ -258,7 +269,13 @@ for (const plugin of PLUGINS) {
       .filter((section) => section.heading === "Options")
       .flatMap((section) => typeTables(section.lines).flatMap((table) => table.keys)),
   );
-  const { required, allowed } = optionNames(name, plugin.options);
+  const required = new Set<string>();
+  const allowed = new Set<string>();
+  for (const type of [plugin.options, ...(plugin.extraOptions ?? [])]) {
+    const names = optionNames(name, type);
+    for (const option of names.required) required.add(option);
+    for (const option of names.allowed) allowed.add(option);
+  }
   const prose = new Set(plugin.documentedInProse ?? []);
   for (const option of required) {
     if (!documented.has(option) && !prose.has(option)) {

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { AUDIT_LOG_ERROR_CODES, auditLog } from "@checodo/better-auth-audit-log";
 import { auditLogClient } from "@checodo/better-auth-audit-log/client";
+import { consoleDestination, httpDestination } from "@checodo/better-auth-audit-log/destinations";
 import { authentication } from "@checodo/better-auth-authentication";
 import { authenticationClient } from "@checodo/better-auth-authentication/client";
 import { BLOCKLIST_ERROR_CODES, blocklist } from "@checodo/better-auth-blocklist";
@@ -25,6 +26,8 @@ import { createAuthClient } from "better-auth/client";
 import { getMigrations } from "better-auth/db/migration";
 
 const baseURL = "http://localhost:3000";
+/** Event types the audit log's custom destination got. */
+const forwarded: string[] = [];
 
 const options = {
   baseURL,
@@ -39,7 +42,18 @@ const options = {
     waitlist({ allow: ["example.com"], confirmEmail: false }),
     referral(),
     authentication({ steam: {} }),
-    auditLog(),
+    auditLog({
+      destinations: [
+        {
+          name: "smoke",
+          send: (batch) => {
+            forwarded.push(...batch.map((event) => event.type));
+          },
+        },
+        consoleDestination({ events: ["none.*"] }),
+        httpDestination({ url: "https://example.com", events: ["none.*"] }),
+      ],
+    }),
   ],
 } satisfies BetterAuthOptions;
 
@@ -124,6 +138,8 @@ const events = await call("/audit-log/list-events", { cookie });
 assert.equal(events.status, 200, `audit-log/list-events: ${await events.clone().text()}`);
 const { events: list } = (await events.json()) as { events: Array<{ type: string }> };
 assert.ok(list.length > 0, "audit-log recorded events");
+await auth.api.flushAuditDestinations();
+assert.ok(forwarded.includes("sign-up"), "audit-log sent events to its destination");
 
 // authentication: Steam builds its sign-in URL without network access.
 const steam = await call("/sign-in/social", {

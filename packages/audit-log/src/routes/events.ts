@@ -59,7 +59,11 @@ export function createEventEndpoints(options: ResolvedAuditLogOptions, recorder:
             AUDIT_LOG_ERROR_CODES.YOU_ARE_NOT_ALLOWED_TO_LIST_OTHER_USERS_EVENTS,
           );
         }
-        const { events, total } = await recorder.storageFor(ctx.context).read({
+        const storage = recorder.storageFor(ctx.context);
+        if (!storage.read) {
+          throw APIError.from("NOT_IMPLEMENTED", AUDIT_LOG_ERROR_CODES.READ_NOT_SUPPORTED);
+        }
+        const { events, total } = await storage.read({
           userId: admin ? query.userId : me.id,
           actorUserId: query.actorUserId,
           type: query.type,
@@ -150,7 +154,30 @@ export function createEventEndpoints(options: ResolvedAuditLogOptions, recorder:
           ctx.context,
           new Date(Date.now() - days * 86_400_000),
         );
+        if (deleted === null) {
+          throw APIError.from("NOT_IMPLEMENTED", AUDIT_LOG_ERROR_CODES.DELETE_NOT_SUPPORTED);
+        }
         return ctx.json({ deleted });
+      },
+    ),
+    /**
+     * Server only: sends every event still waiting in a destination's
+     * batch and waits for running sends. Call it before the process
+     * stops, or at the end of a serverless function without
+     * `advanced.backgroundTasks`.
+     */
+    flushAuditDestinations: createAuthEndpoint(
+      {
+        method: "POST",
+        metadata: {
+          openapi: {
+            description: "Send the events waiting for the audit log's destinations. Server only",
+          },
+        },
+      },
+      async (ctx) => {
+        await recorder.destinations.flush();
+        return ctx.json({ success: true });
       },
     ),
     /**

@@ -100,10 +100,10 @@ account changes, and admin actions, and the events of the other plugins.
 
 | Control                                                          | How the plugin can contribute                                                        |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| SOC 2 CC7.2 (monitors for anomalies), ISO A.8.16 (Monitoring activities) | Failed sign-ins, blocked requests, and admin actions with a [severity](/docs/audit-log#events); [`onEvent`](/docs/audit-log#forwarding-events) forwards them to your monitoring or SIEM |
+| SOC 2 CC7.2 (monitors for anomalies), ISO A.8.16 (Monitoring activities) | Failed sign-ins, blocked requests, and admin actions with a [severity](/docs/audit-log#events); [`destinations`](/docs/audit-log#forwarding-events) forward them to your monitoring or SIEM (best effort; `httpDestination` can sign requests) |
 | SOC 2 CC7.3 (evaluates security events), GDPR Art. 33            | Audit events provide evidence that can help investigate security incidents and assess whether a personal data breach requires notification under Art. 33. The organization remains responsible for assessing and making any required notifications within the applicable deadlines |
 | SOC 2 CC6.2, CC6.3 (registers, authorizes, modifies, removes access), ISO A.8.2 (Privileged access rights) | Sign-ups, role changes, bans, impersonation, and deleted users, with the admin who did it: evidence for access reviews |
-| ISO A.8.15 (Logging), A.5.28 (Collection of evidence), GDPR Art. 32(1)(b) | Events in their own table. The optional [hash chain](/docs/audit-log#hash-chain), off by default, can help detect certain changes or deletions of recorded events when enabled |
+| ISO A.8.15 (Logging), A.5.28 (Collection of evidence), GDPR Art. 32(1)(b) | Events in their own table. The optional [hash chain](/docs/audit-log#hash-chain), off by default, can help detect certain changes or deletions of recorded events when enabled. [`destinations`](/docs/audit-log#forwarding-events) can keep a copy in a separately controlled log store, which can help when the application database itself is compromised |
 | SOC 2 P4.2, P4.3, ISO A.8.10 (Information deletion), GDPR Art. 5(1)(e) | The opt-in [`retention`](/docs/audit-log#retention) deletes eligible audit events when cleanup runs. This can support retention and deletion controls, but backups and other copies remain your responsibility |
 | ISO A.8.11 (Data masking), GDPR Art. 5(1)(c)                     | `captureIp` and `captureUserAgent` turn data off; [`beforeLog`](/docs/audit-log#privacy) can pseudonymize it; metadata under recognized secret-related keys is redacted (see below) |
 | GDPR Art. 15                                                     | Users can list their own audit events. This may support an access request, but it does not provide a complete export of all personal data processed by the organization |
@@ -119,7 +119,11 @@ Left to you:
   organization's retention policy or determine which retention period is
   legally appropriate; document the period in your privacy policy.
 - **Look at the log.** Recording is not monitoring: alert on critical
-  events (`onEvent`) and review admin actions regularly.
+  events (`destinations`) and review admin actions regularly.
+- **Check that forwarding works.** Destinations are best effort: failed
+  sends are logged, not retried, and events waiting in a batch are lost
+  if the process stops. Watch for `[audit-log] destination` errors, and
+  keep the database storage as the record if every event must arrive.
 - **Protect the log.** Restrict who can write to the database. The hash
   chain does not independently protect against an attacker who can
   modify both the event database and the chain key. For stronger tamper

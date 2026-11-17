@@ -109,6 +109,7 @@ export declare const request: Request;
 export declare const ctx: GenericEndpointContext;
 export declare const order: { id: string; userId: string };
 export declare function alertSecurityTeam(event: unknown): Promise<void>;
+export declare function saveFailures(rows: { at: Date; type: string }[]): Promise<void>;
 export declare function grantCredit(
   userId: string,
   options?: { idempotencyKey?: string },
