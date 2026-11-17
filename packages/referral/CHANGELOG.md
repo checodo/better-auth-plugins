@@ -1,5 +1,15 @@
 # @checodo/better-auth-referral
 
+## 0.4.0
+
+### Minor Changes
+
+- edbec35: Record rewards that failed for good. With the audit log, when `onReferralCompleted` throws on its last attempt (`rewardRetry.maxAttempts`), a `referral.reward-failed` event is recorded (severity `high`, `userId`: the referrer, `metadata`: `referralId`, `referredUserId`, `attempts`), once each time a referral's attempts run out, so the audit log's `onEvent` can alert on a reward that will never be granted.
+
+### Patch Changes
+
+- 1205fac: Fix `maxReferralsPerUser` being exceeded after it was lowered: when sign-ups with the same code settled at the same time, places taken under the higher limit weren't counted, so the referrer could end up with more referrals than the new limit.
+
 ## 0.3.0
 
 ### Minor Changes
