@@ -1,5 +1,26 @@
 # @checodo/better-auth-waitlist
 
+## 0.4.0
+
+### Minor Changes
+
+- 01f3d0b: Record when an email was confirmed, and clean up expired entries on a schedule.
+  
+  - New `confirmedAt` field on `waitlistEntry`: when the person opened the confirmation link (double opt-in). It stays `null` when nobody confirmed the email: with `confirmEmail: false`, for emails an admin invited directly before they confirmed, and for entries confirmed before this release.
+  - With the audit log, confirmations (`waitlist.confirmed`) and people leaving through the link (`waitlist.left`) are recorded, both with severity `low` and no actor. `waitlist.left` and `waitlist.entry-deleted` are recorded once, also when the same entry is deleted by concurrent requests.
+  - Expired unconfirmed entries are now also deleted in the background on any waitlist request (at most once an hour), not only when someone joins. New server-only `auth.api.deleteExpiredWaitlistEntries()` for a cron job, returning `{ deleted }`.
+  - New `retention` option: `{ rejected, registered }` deletes rejected and registered entries after that many days (kept by default), and `sweepInterval` sets how often the cleanup runs (seconds, default `3600`).
+  
+  **Migration required:** `confirmedAt` is a new optional column. Run `npx auth@latest migrate` (or `generate` for Prisma and Drizzle); existing rows get `null`.
+
+### Patch Changes
+
+- 50f8e3f: Fix two rare outcomes of confirming an email at the same moment as something else changes the entry, and refuse durations no date can hold.
+  
+  - A confirmation that finds the waitlist over `maxEntries` while an admin has just approved or rejected the same entry no longer answers `WAITLIST_FULL`: the confirmation stands, keeps its `confirmedAt`, and is recorded as `waitlist.confirmed`.
+  - A confirmation link whose entry is deleted while it is being confirmed (its link expired and the cleanup removed it) now answers `INVALID_TOKEN` instead of `success`.
+  - `confirmationExpiresIn`, `retention.rejected`, and `retention.registered` must be at most 100 years (36,500 days). Larger values put the cleanup's cutoff outside the range of a date, so every cleanup failed.
+
 ## 0.3.0
 
 ### Minor Changes

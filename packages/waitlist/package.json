@@ -1,6 +1,6 @@
 {
   "name": "@checodo/better-auth-waitlist",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Gate sign-ups behind a waitlist with admin approval and invite codes in better-auth.",
   "type": "module",
   "license": "MIT",
