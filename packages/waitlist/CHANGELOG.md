@@ -1,5 +1,11 @@
 # @checodo/better-auth-waitlist
 
+## 0.4.1
+
+### Patch Changes
+
+- 7c1dafc: Internal: the shared helper that runs user callbacks can now also report failures (used by the security alerts plugin). No change in behavior.
+
 ## 0.4.0
 
 ### Minor Changes
