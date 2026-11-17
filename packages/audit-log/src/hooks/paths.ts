@@ -4,6 +4,8 @@ import type {
   HookEndpointContext,
 } from "@better-auth/core";
 import { isAPIError } from "@better-auth/core/utils/is-api-error";
+import { PASSWORD_RESET_PATHS, passwordResetUserId } from "@repo/plugin-utils/password-reset";
+import { signInSessionOf } from "@repo/plugin-utils/sign-in";
 import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { EventDetails, Recorder } from "../recorder";
 import type { ResolvedAuditLogOptions } from "../types";
@@ -26,23 +28,6 @@ const SIGN_IN_PATHS = new Set([
   "/two-factor/verify-totp",
   "/two-factor/verify-otp",
   "/two-factor/verify-backup-code",
-]);
-
-/**
- * Endpoints that set a new session cookie for a user who is already signed
- * in (rotation, impersonation): not sign-ins. Most of them also load the
- * session, which rules them out anyway; this list covers the rest.
- */
-const NOT_SIGN_IN_PATHS = new Set([
-  "/change-password",
-  "/update-user",
-  "/update-session",
-  "/change-email",
-  "/two-factor/enable",
-  "/two-factor/disable",
-  "/admin/impersonate-user",
-  "/admin/stop-impersonating",
-  "/multi-session/set-active",
 ]);
 
 interface PathEvent {
@@ -68,13 +53,6 @@ function field(returned: unknown, ...path: string[]): unknown {
   }
   return value;
 }
-
-/** Endpoints whose subject is the user of a password reset, looked up before the reset. */
-const PASSWORD_RESET_PATHS = new Set([
-  "/reset-password",
-  "/email-otp/reset-password",
-  "/phone-number/reset-password",
-]);
 
 const passwordReset: PathEvent = { type: "password-reset", subject: lookedUp };
 
@@ -205,33 +183,12 @@ const asString = (value: unknown): string | null =>
 
 /**
  * Looks up, before the endpoint runs, what is gone afterwards: the
- * session (sign-out, revoke), the user of a password reset (by token, or by
- * the email or phone number of an OTP reset), or of a session an admin
- * revokes.
+ * session (sign-out, revoke), the user of a password reset, or of a
+ * session an admin revokes.
  */
 async function lookUpSubject(ctx: GenericEndpointContext): Promise<string | undefined> {
   const body = (ctx.body ?? {}) as Body;
-  if (ctx.path === "/reset-password") {
-    const token = asString(body.token) ?? asString((ctx.query as Body | undefined)?.token);
-    if (!token) return undefined;
-    const verification = await ctx.context.internalAdapter.findVerificationValue(
-      `reset-password:${token}`,
-    );
-    return verification?.value;
-  }
-  if (ctx.path === "/email-otp/reset-password") {
-    const email = asString(body.email)?.trim().toLowerCase();
-    if (!email) return undefined;
-    return (await ctx.context.internalAdapter.findUserByEmail(email))?.user.id;
-  }
-  if (ctx.path === "/phone-number/reset-password") {
-    const phone = asString(body.phoneNumber)?.trim();
-    if (!phone) return undefined;
-    const user = await ctx.context.adapter
-      .findOne<{ id: string }>({ model: "user", where: [{ field: "phoneNumber", value: phone }] })
-      .catch(() => null);
-    return user?.id;
-  }
+  if (PASSWORD_RESET_PATHS.has(ctx.path ?? "")) return passwordResetUserId(ctx);
   if (ctx.path === "/admin/revoke-user-session") {
     const token = asString(body.sessionToken);
     if (!token) return undefined;
@@ -345,14 +302,8 @@ export function createPathHooks(
     const session = ctx.context.session;
 
     // A sign-in, by any method: a new session for a request that had none.
-    const created = ctx.context.newSession;
-    if (
-      !failed &&
-      created &&
-      !session &&
-      !NOT_SIGN_IN_PATHS.has(path) &&
-      !(created.session as { impersonatedBy?: unknown }).impersonatedBy
-    ) {
+    const created = signInSessionOf(ctx);
+    if (created) {
       await recorder.record(
         ctx.context,
         {

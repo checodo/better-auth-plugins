@@ -9,8 +9,12 @@
     "./admin": "./src/admin.ts",
     "./audit": "./src/audit.ts",
     "./callbacks": "./src/callbacks.ts",
+    "./ip": "./src/ip.ts",
     "./options": "./src/options.ts",
-    "./pagination": "./src/pagination.ts"
+    "./pagination": "./src/pagination.ts",
+    "./password-reset": "./src/password-reset.ts",
+    "./sign-in": "./src/sign-in.ts",
+    "./user-changes": "./src/user-changes.ts"
   },
   "scripts": {
     "test": "vitest run",

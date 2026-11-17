@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { totp } from "@repo/tooling/test-helpers";
 import type { BetterAuthPlugin } from "better-auth";
 import type { TestHelpers } from "better-auth/plugins";
 import {
@@ -38,22 +38,6 @@ async function setup<const P extends BetterAuthPlugin[]>(plugins: P) {
   const events = (type: string): AuditEvent[] =>
     storage.events.filter((event) => event.type === type);
   return { auth, context, createUser, events, storage };
-}
-
-/** RFC 6238 TOTP (SHA-1, 6 digits, 30 s) for a base32 secret, as authenticator apps compute it. */
-function totp(base32: string, at = Date.now()): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = "";
-  for (const char of base32.replace(/=+$/, "").toUpperCase()) {
-    bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
-  }
-  const key = Buffer.from((bits.match(/.{8}/g) ?? []).map((byte) => Number.parseInt(byte, 2)));
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(at / 1000 / 30)));
-  const hmac = createHmac("sha1", key).update(counter).digest();
-  const offset = (hmac[hmac.length - 1] ?? 0) & 0xf;
-  const code = (hmac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
-  return code.toString().padStart(6, "0");
 }
 
 describe("organization", () => {
