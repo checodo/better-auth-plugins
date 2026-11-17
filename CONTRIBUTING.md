@@ -395,7 +395,9 @@ Trunk-based development: `main` plus short-lived feature branches.
   [CI and releases](#ci-and-releases)).
 - Each plugin has a `CHANGELOG.md` (published with the package) that
   Changesets fills, newest version first. Don't edit it by hand: put the
-  text in the changeset.
+  text in the changeset. The docs' Changelog page is generated from these
+  files on every docs build (`apps/docs/scripts/changelog.mts`), so the
+  deploy after a release shows the new versions.
 
 ### Branch protection (GitHub settings, once CI is on)
 
