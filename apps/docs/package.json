@@ -25,6 +25,7 @@
     "@checodo/better-auth-authentication": "workspace:*",
     "@checodo/better-auth-blocklist": "workspace:*",
     "@checodo/better-auth-referral": "workspace:*",
+    "@checodo/better-auth-security-alerts": "workspace:*",
     "@checodo/better-auth-waitlist": "workspace:*",
     "@repo/tooling": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",

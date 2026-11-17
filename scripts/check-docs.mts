@@ -45,6 +45,11 @@ const PLUGINS: PluginDocs[] = [
   },
   { dir: "blocklist", pages: ["blocklist.mdx"], options: "BlocklistOptions" },
   { dir: "referral", pages: ["referral.mdx"], options: "ReferralOptions" },
+  {
+    dir: "security-alerts",
+    pages: ["security-alerts.mdx"],
+    options: "SecurityAlertsOptions",
+  },
   { dir: "waitlist", pages: ["waitlist.mdx"], options: "WaitlistOptions" },
 ];
 

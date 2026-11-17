@@ -67,6 +67,7 @@ before a user is created.
 | Waitlist + referral              | Both codes come with the request that creates the user: `x-invite-code` and `x-referral-code` headers, or `additionalData` for social sign-in. |
 | Waitlist + authentication        | Steam, Epic, and Xbox players have placeholder emails, which are never on the waitlist: `allow` their domains, as above.              |
 | Blocklist + authentication       | Nobody can sign up with a placeholder domain (`EMAIL_DOMAIN_RESERVED`); blocklist rules apply to real emails as usual.                |
+| Security alerts + audit log      | Every alert is recorded as `security.alert-sent`, and a secured account as `security.account-secured`. Neither plugin needs the other. |
 | Audit log + any plugin           | Blocklist refusals and rule changes, waitlist approvals, and referrals are recorded, see [Events from other plugins](/docs/audit-log#events-from-other-plugins). |
 
 ## Works with better-auth's plugins
@@ -75,18 +76,23 @@ Every plugin is tested with the official plugins below. Users are checked
 when they are created, so a plugin that creates users its own way is
 covered as well.
 
-| Official plugin       | Blocklist                         | Waitlist                          | Referral                   | Audit log                                       |
-| --------------------- | --------------------------------- | --------------------------------- | -------------------------- | ----------------------------------------------- |
-| Social sign-in        | Checks the email                  | Gated; code in `additionalData`   | Code in `additionalData`   | Sign-up, sign-in, linked accounts               |
-| Magic link            | Checks the email                  | Gated                             | `x-referral-code` header   | Sign-in                                         |
-| Email OTP             | Checks sign-up and email changes  | Gated                             | `x-referral-code` header   | Sign-in, failed sign-in, password reset         |
-| Phone number          | Checks the generated email        | Gated; `allow` its domain         | `x-referral-code` header   | Failed sign-in, password reset                  |
-| Sign-In with Ethereum | Checks the email given            | Gated; `allow` its domain         | `x-referral-code` header   | Sign-up, sign-in                                |
-| Anonymous             | Guests pass                       | Gated; `bypass` it                | -                          | Sign-up, sign-in                                |
-| Username              | Checks usernames                  | -                                 | -                          | Failed sign-in by username                      |
-| Admin                 | Checks `createUser`               | `createUser` skips it             | -                          | Every admin action                              |
-| Organization          | Names, slugs, teams, invitations  | -                                 | -                          | Organizations, invitations, members, roles      |
-| Two-factor            | -                                 | -                                 | -                          | Second factor, turning it on and off            |
+| Official plugin       | Blocklist                         | Waitlist                          | Referral                   | Audit log                                       | Security alerts                       |
+| --------------------- | --------------------------------- | --------------------------------- | -------------------------- | ----------------------------------------------- | ------------------------------------- |
+| Social sign-in        | Checks the email                  | Gated; code in `additionalData`   | Code in `additionalData`   | Sign-up, sign-in, linked accounts               | New device; linked accounts           |
+| Magic link            | Checks the email                  | Gated                             | `x-referral-code` header   | Sign-in                                         | New device                            |
+| Email OTP             | Checks sign-up and email changes  | Gated                             | `x-referral-code` header   | Sign-in, failed sign-in, password reset         | New device, password reset            |
+| Phone number          | Checks the generated email        | Gated; `allow` its domain         | `x-referral-code` header   | Failed sign-in, password reset                  | Password reset by SMS                 |
+| Sign-In with Ethereum | Checks the email given            | Gated; `allow` its domain         | `x-referral-code` header   | Sign-up, sign-in                                | New device                            |
+| Anonymous             | Guests pass                       | Gated; `bypass` it                | -                          | Sign-up, sign-in                                | -                                     |
+| Username              | Checks usernames                  | -                                 | -                          | Failed sign-in by username                      | New device                            |
+| Admin                 | Checks `createUser`               | `createUser` skips it             | -                          | Every admin action                              | Changes an admin makes                |
+| Organization          | Names, slugs, teams, invitations  | -                                 | -                          | Organizations, invitations, members, roles      | -                                     |
+| Two-factor            | -                                 | -                                 | -                          | Second factor, turning it on and off            | Turning it off; one alert per sign-in |
+
+Security alerts also work with the separate
+[passkey](https://better-auth.com/docs/plugins/passkey) (passkeys added
+and removed) and [API key](https://better-auth.com/docs/plugins/api-key)
+(keys created) packages.
 
 The [authentication](/docs/authentication) providers also work with
 `lastLoginMethod` (the method is `steam`, `epic`, or `xbox`) and

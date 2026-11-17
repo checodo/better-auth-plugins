@@ -1,0 +1,702 @@
+---
+title: Security alerts
+description: Tell users about security-relevant changes to their account, with a "This wasn't me" link.
+---
+
+The security alerts plugin tells users when something security-relevant
+happens to their account: a sign-in from a new device, a changed password
+or email address, a passkey added, two-factor turned off. You send the
+alerts (email, SMS, push); the plugin decides when, and what's in them.
+
+- Ten alert types, each on or off. Types whose plugin you don't use
+  (passkey, two-factor, API key) never fire.
+- New-device detection without storing the device: a keyed hash of the
+  browser and OS family, no alert on the first sign-in, devices forgotten
+  after 90 days without a sign-in.
+- An email change is reported to the **old** address, so someone who
+  took over the account can't hide it.
+- A "This wasn't me" link that signs out every session and blocks the
+  password. Opening the link changes nothing, so mail scanners can't
+  trigger it.
+- Never slows down or fails a request: alerts run in the background when
+  configured, and errors are logged.
+- Works on its own; with the [audit log](/docs/audit-log), every alert is
+  recorded too.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-security-alerts
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { securityAlerts } from "@checodo/better-auth-security-alerts";
+
+export const auth = betterAuth({
+  plugins: [
+    securityAlerts({
+      sendAlert: async ({ type, email, details, secureAccountUrl }) => {
+        await sendEmail({
+          to: email,
+          subject: `Security alert: ${type}`,
+          text: `${details.device.label}, ${details.at.toISOString()}.\nNot you? ${secureAccountUrl}`,
+        });
+      },
+      secureAccount: {
+        callbackURL: "/secure-account",
+        resetPasswordURL: "/reset-password",
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+The plugin adds a `knownDevice` table (see [Schema](#schema)).
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { createAuthClient } from "better-auth/client";
+import { securityAlertsClient } from "@checodo/better-auth-security-alerts/client";
+
+export const authClient = createAuthClient({
+  plugins: [securityAlertsClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Alert types
+
+| Type                       | When                                                                 | Sent to          | Link |
+| -------------------------- | -------------------------------------------------------------------- | ---------------- | ---- |
+| `new-device`               | A sign-in, by any method, from a browser or device not seen before   | the user         | yes  |
+| `password-changed`         | `changePassword`, or an admin's `setUserPassword`                    | the user         | yes  |
+| `password-reset-requested` | A reset link or code was requested (email, email OTP, phone number)  | the user         | no   |
+| `password-reset`           | The password was set with a reset link or code                       | the user         | yes  |
+| `email-changed`            | The email address changed, by any flow                               | the **old** address | yes |
+| `passkey-added`            | A passkey was registered ([passkey plugin](https://better-auth.com/docs/plugins/passkey)) | the user | yes |
+| `passkey-removed`          | A passkey was deleted                                                | the user         | yes  |
+| `two-factor-disabled`      | Two-factor was turned off ([two-factor plugin](https://better-auth.com/docs/plugins/2fa)) | the user | yes |
+| `account-linked`           | A social or other account was linked (not the first one, at sign-up) | the user        | yes  |
+| `api-key-created`          | An API key was created ([api-key plugin](https://better-auth.com/docs/plugins/api-key)) | the user | yes |
+
+Every type is on by default. Turn single types off with `alerts`:
+
+```ts
+securityAlerts({
+  sendAlert: async () => {},
+  alerts: { "account-linked": false, "api-key-created": false },
+});
+```
+
+`password-reset-requested` has no "This wasn't me" link: nothing has
+changed yet, so the alert only says "ignore this if it wasn't you". It is
+only sent for users that exist; the endpoint answers the same either way.
+
+### Sending alerts
+
+`sendAlert` gets the alert type, the user (after the change), the address
+to send to (`email`), the [details](#alert-details), and the
+`secureAccountUrl`, and the request as its second argument. Send the
+alert however you like; one template per type works well.
+
+```ts
+securityAlerts({
+  sendAlert: async ({ type, user, email, details, secureAccountUrl }) => {
+    const what = {
+      "new-device": `New sign-in on ${details.device.label}`,
+      "password-changed": "Your password was changed",
+      "password-reset-requested": "Someone asked to reset your password",
+      "password-reset": "Your password was reset",
+      "email-changed": `Your email address was changed to ${details.newEmail}`,
+      "passkey-added": `Passkey "${details.passkeyName ?? "unnamed"}" added`,
+      "passkey-removed": `Passkey "${details.passkeyName ?? "unnamed"}" removed`,
+      "two-factor-disabled": "Two-factor authentication was turned off",
+      "account-linked": `Your ${details.providerId} account was linked`,
+      "api-key-created": `API key "${details.apiKeyName ?? "unnamed"}" created`,
+    }[type];
+    await sendEmail({
+      to: email,
+      subject: what,
+      text: [
+        `Hi ${user.name},`,
+        `${what} (${details.at.toUTCString()}, IP ${details.ipAddress ?? "unknown"}).`,
+        details.actor === "admin" ? "An administrator made this change." : "",
+        secureAccountUrl ? `Wasn't you? Secure your account: ${secureAccountUrl}` : "",
+      ].join("\n"),
+    });
+  },
+});
+```
+
+With better-auth's `advanced.backgroundTasks` configured, `sendAlert`
+runs after the response is sent, so a slow mail server doesn't slow down
+sign-ins. Without it, it is awaited. Either way, errors are logged as
+`[security-alerts] sendAlert threw an error` and never reach the client.
+
+#### Alert details
+
+| Field          | Types                                  | What                                                     |
+| -------------- | -------------------------------------- | -------------------------------------------------------- |
+| `at`           | all                                    | When it happened                                         |
+| `ipAddress`    | all                                    | The request's IP address, as better-auth sees it (`advanced.ipAddress`) |
+| `userAgent`    | all                                    | The request's user agent                                 |
+| `device`       | all                                    | `{ browser, os, label }`, e.g. `"Chrome on macOS"`        |
+| `actor`        | all                                    | `"user"` or `"admin"` (see [Admin actions](#admin-actions)) |
+| `newEmail`     | `email-changed`                        | The new address, masked: `j***@example.com`              |
+| `channel`      | `password-reset-requested`, `password-reset` | `"email"` or `"phone-number"`                      |
+| `providerId`   | `account-linked`                       | E.g. `"github"`                                          |
+| `passkeyId`, `passkeyName` | `passkey-added`, `passkey-removed` | The passkey and the name the user gave it        |
+| `apiKeyId`, `apiKeyName`   | `api-key-created`          | The key's id and name; never the key                     |
+
+The new address in `email-changed` is masked because the alert goes to
+the old address, which may be in someone else's hands by then.
+
+### New devices
+
+When a user signs in (with a password, OAuth, a magic link, a passkey, an
+OTP, ...), the plugin compares the browser and OS family with the devices
+the user signed in from before:
+
+- **Known device:** no alert. Versions don't count, so a browser update
+  isn't a new device.
+- **New device:** an alert, and the device is remembered.
+- **First sign-in:** the user has no devices on record yet (a new user,
+  or the first sign-in after you added the plugin). No alert, the device
+  is remembered.
+- **Not seen for 90 days** (`newDevice.expiresIn`): new again.
+
+Session rotations, impersonation by an admin, and failed sign-ins don't
+count. With [two-factor](https://better-auth.com/docs/plugins/2fa), one
+sign-in alerts once.
+
+The plugin stores no user agent or IP address of its own: `knownDevice`
+holds a hash of the browser family, OS family, and (with
+`newDevice.includeIp`) network, keyed with your auth secret, plus a label
+like "Chrome on macOS" for the [device list](#device-list).
+
+<Callout type="warn">
+Changing `secret` (or `BETTER_AUTH_SECRET`) changes every hash: each
+user's next sign-in from every device alerts once.
+</Callout>
+
+To tell networks apart too, set `newDevice.includeIp`: a sign-in from
+another /24 (IPv4) or /48 (IPv6) range counts as a new device. Phones and
+laptops change networks often, so this alerts much more.
+
+`newDevice.isNewDevice` lets you decide yourself, e.g. to trust a
+company network or to ignore a test account. Return `true` to alert,
+`false` not to, or `undefined` for the default:
+
+```ts
+securityAlerts({
+  sendAlert: async () => {},
+  newDevice: {
+    isNewDevice: ({ ipAddress, known, firstSignIn }) => {
+      if (ipAddress?.startsWith("10.")) return false; // office network
+      return undefined; // default: !known && !firstSignIn
+    },
+  },
+});
+```
+
+The built-in parser knows the common browsers (Chrome, Edge, Firefox,
+Safari, Opera, Samsung Internet, Vivaldi, Yandex, Brave) and systems
+(Windows, macOS, iOS, Android, ChromeOS, Linux), and prefers User-Agent
+Client Hints (`Sec-CH-UA`, `Sec-CH-UA-Platform`) when the browser sends
+them. To use a parser library instead, pass `newDevice.getDevice`:
+
+```ts no-check
+import { UAParser } from "ua-parser-js";
+
+securityAlerts({
+  sendAlert: async () => {},
+  newDevice: {
+    getDevice: (headers) => {
+      const { browser, os } = UAParser(headers.get("user-agent") ?? "");
+      return { browser: browser.name ?? null, os: os.name ?? null };
+    },
+  },
+});
+```
+
+### "This wasn't me"
+
+With the `secureAccount` option, every alert except
+`password-reset-requested` gets a `secureAccountUrl`: a single-use link,
+valid for 7 days (`secureAccount.expiresIn`). It works in three steps:
+
+1. The link (`GET /security-alerts/secure-account/:token`) checks the
+   token and redirects to your page, `secureAccount.callbackURL`, with
+   `?token=...` (or `?error=INVALID_TOKEN`). **It changes nothing**: mail
+   scanners and link previews open links in emails, and must not lock
+   anyone out.
+2. Your page asks the user to confirm.
+3. On confirmation, it calls `secureAccount` with the token, which:
+   - signs out every session of the user, everywhere;
+   - makes every device new again, so the next sign-in from any of them
+     alerts;
+   - removes what the alert was about, if an attacker could sign in with
+     it: the passkey of `passkey-added`, the account of `account-linked`,
+     the API key of `api-key-created`;
+   - with `secureAccount.emailChange: "restore"`, puts the old email
+     address back (see [Email changes](#email-changes));
+   - blocks the password and sends a reset link (`secureAccount.password`,
+     see below);
+   - records `security.account-secured` in the audit log, if you use it,
+     and calls `secureAccount.onSecured` (see [After securing](#after-securing)).
+
+```tsx title="app/secure-account/page.tsx" no-check
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
+
+export default function SecureAccountPage() {
+  const params = useSearchParams();
+  const token = params.get("token");
+  const [state, setState] = useState<"ask" | "busy" | "done" | "failed">("ask");
+
+  if (!token || params.get("error")) {
+    return <p>This link is invalid or has expired. Sign in and change your password.</p>;
+  }
+  if (state === "done") {
+    return (
+      <p>
+        Your account is secured: every session is signed out. We sent you a link to set a
+        new password.
+      </p>
+    );
+  }
+
+  const secure = async () => {
+    setState("busy");
+    const { error } = await authClient.securityAlerts.secureAccount({ token });
+    setState(error ? "failed" : "done");
+  };
+
+  return (
+    <div>
+      <meta name="referrer" content="no-referrer" />
+      <h1>Secure your account</h1>
+      <p>
+        This signs you out everywhere and blocks your current password. You'll get an email
+        to set a new one.
+      </p>
+      <button type="button" onClick={secure} disabled={state === "busy"}>
+        Secure my account
+      </button>
+      {state === "failed" && <p>This link is invalid or has expired.</p>}
+    </div>
+  );
+}
+```
+
+The playground has a working page at `/secure-account`.
+
+The token is in the page's URL. Keep it out of `Referer` headers to other
+sites (analytics, fonts, images) with `Referrer-Policy: no-referrer` on
+that page, e.g. `<meta name="referrer" content="no-referrer" />`.
+
+#### Email changes
+
+The link of an `email-changed` alert goes to the **old** address. What
+confirming it does about the email depends on `secureAccount.emailChange`:
+
+| Value             | What happens                                                                 |
+| ----------------- | ---------------------------------------------------------------------------- |
+| `"keep"` (default) | The new address stays, and the reset link goes there.                        |
+| `"restore"`       | The old address is put back (marked verified: the person just opened a link sent to it), and the reset link goes there. Not if another account has the address by now. |
+
+`"restore"` undoes the classic takeover: an attacker signs in, changes
+the email to their own, and resets the password. But it trusts the old
+mailbox: if a user moved away from an address someone else took over,
+`"restore"` hands the account to whoever holds it. Choose what fits your
+users; with `"keep"`, changing the address back is up to your support.
+
+Securing an account doesn't send alerts about its own changes, so the
+replaced address gets no `email-changed` alert.
+
+#### After securing
+
+`secureAccount.onSecured` runs after an account was secured, for what
+the plugin can't do itself: revoke API keys kept in secondary storage,
+open a support ticket, tell your team.
+
+```ts
+securityAlerts({
+  sendAlert: async () => {},
+  secureAccount: {
+    callbackURL: "/secure-account",
+    resetPasswordURL: "/reset-password",
+    onSecured: async ({ user, alert, password, removed, restoredEmail }) => {
+      await sendEmail({
+        to: "security@example.com",
+        subject: `Account secured: ${user.email}`,
+        text: `After a ${alert} alert. Password: ${password}. Removed: ${removed ?? "nothing"}. Restored email: ${restoredEmail ?? "no"}.`,
+      });
+    },
+  },
+});
+```
+
+It runs like `sendAlert` (in the background with
+`advanced.backgroundTasks`); errors are logged.
+
+#### What it can't undo
+
+- **Signed-out devices with a cookie cache.** With better-auth's
+  `session.cookieCache`, a signed-out device keeps working until its
+  cached cookie expires (`cookieCache.maxAge`, 5 minutes by default),
+  like after any revoked session. The plugin can't reach that cookie;
+  keep `maxAge` short (a minute or two) if you use the "This wasn't me"
+  link, or turn the cookie cache off.
+- **Two-factor that was turned off** stays off; the user turns it on
+  again after signing in.
+- **API keys in secondary storage** (the api-key plugin's `storage:
+  "secondary-storage"`) aren't removed, only keys in the database.
+  Revoke them in `onSecured`.
+
+#### What happens to the password
+
+Whoever signed in probably knows the password, so signing out alone
+isn't enough. `secureAccount.password` decides:
+
+| Value                | What happens                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `"block"` (default)  | The current password stops working, and a reset link is sent. The attacker can't sign in with it again; the user sets a new one. |
+| `"send-reset"`       | A reset link is sent; the current password keeps working until the user resets it.  |
+| `"none"`             | Only the sessions are signed out.                                                    |
+
+The reset link is the same as better-auth's `requestPasswordReset`
+sends: it goes through `emailAndPassword.sendResetPassword` and leads to
+`secureAccount.resetPasswordURL` (required unless `password` is
+`"none"`). Without `sendResetPassword`, `"block"` and `"send-reset"` act
+like `"none"`, and the plugin logs a warning at startup: a blocked
+password could not be reset. Users without a password (only social
+sign-in) are only signed out.
+
+### Device list
+
+Users can see the devices they signed in from, and forget one; the next
+sign-in from it alerts again.
+
+```ts
+const { data: devices } = await authClient.securityAlerts.listDevices();
+// [{ id, label: "Chrome on macOS", lastSeenAt, createdAt, expiresAt, current: true }, ...]
+
+await authClient.securityAlerts.forgetDevice({ id: "device-id" });
+```
+
+`listDevices` only shows devices seen within `newDevice.expiresIn`;
+`current` marks the device of the request. Both need a session and only
+see the signed-in user's devices.
+
+### Admin actions
+
+When an admin changes someone's account (the admin plugin's
+`setUserPassword`, `updateUser` with a new email, ...), the user gets the
+alert, with `details.actor: "admin"`. `adminActions` changes that:
+
+```ts
+securityAlerts({
+  sendAlert: async () => {},
+  adminActions: {
+    alert: true, // false: no alerts for changes an admin makes
+    showActor: false, // details.actor is always null
+  },
+});
+```
+
+### Avoiding duplicate emails
+
+Some better-auth flows send their own email for the same event. The
+plugin always sends every alert type that is on; decide per type which
+email you want:
+
+| Alert                      | better-auth's own email                                        | To keep only one                                   |
+| -------------------------- | -------------------------------------------------------------- | -------------------------------------------------- |
+| `email-changed`            | `user.changeEmail.sendChangeEmailConfirmation` asks the old address to approve the change, before it happens | Turn the alert off, or keep both: one asks, one reports |
+| `password-reset-requested` | `emailAndPassword.sendResetPassword` (or the OTP) goes to the same address | Turn the alert off unless you reset by phone number |
+| `password-reset`           | `emailAndPassword.onPasswordReset`, if your callback sends an email | Send it from one of the two                     |
+
+To turn an alert off only in some cases, check `type` (and `details`) in
+`sendAlert` and return without sending:
+
+```ts
+securityAlerts({
+  sendAlert: async ({ type, details }) => {
+    // The reset email itself already reaches the address.
+    if (type === "password-reset-requested" && details.channel === "email") return;
+    // ... send the others
+  },
+});
+```
+
+### Audit log
+
+With the [audit log](/docs/audit-log) plugin installed, the plugin
+records `security.alert-sent` for every alert (`status: "failure"` when
+`sendAlert` threw; `metadata.alert` is the type) and
+`security.account-secured` for every secured account. No addresses or
+tokens go into the events. The two plugins don't depend on each other.
+
+### Rate limits
+
+`POST /security-alerts/secure-account` is limited to 5 requests per
+minute per IP (when better-auth's rate limiter is on). Change it with
+`rateLimit.customRules`:
+
+```ts
+betterAuth({
+  rateLimit: {
+    customRules: { "/security-alerts/secure-account": { window: 60, max: 10 } },
+  },
+});
+```
+
+### Limits
+
+- An email change is only reported when the plugin can tell the old
+  address: changes through better-auth's endpoints and the admin plugin.
+  Server code that changes an email outside a request isn't reported.
+- Alerts need a request to tell the device and IP address; changes made
+  by server code outside a request (linking an account, say) are
+  reported with empty request details.
+- Users with placeholder emails (Sign-In with Ethereum, phone number,
+  Steam, ...) get alerts with that address as `email`: skip addresses
+  ending in `.invalid` in `sendAlert`, or send them another way.
+- Without `advanced.backgroundTasks`, `sendAlert` runs before the
+  response: a reset request for an existing email then takes longer than
+  for an unknown one, like better-auth's own reset email does. The
+  plugin logs a warning at startup while `password-reset-requested` is
+  on; configure background tasks so response times don't tell which
+  emails have an account.
+- `phoneNumber` is assumed to be the phone-number plugin's field name.
+- Organization API keys alert the user who created them.
+
+## Schema
+
+Table: `knownDevice`
+
+<TypeTable
+  type={{
+    id: { type: "string", description: "Unique id of the device.", required: true },
+    userId: {
+      type: "string",
+      description: "The user. Foreign key to `user.id` (deleted with the user). Indexed.",
+      required: true,
+    },
+    fingerprint: {
+      type: "string",
+      description:
+        "HMAC-SHA256, keyed with the auth secret, of the browser family, OS family, and (with `newDevice.includeIp`) the network. Unique per user.",
+      required: true,
+    },
+    label: {
+      type: "string",
+      description: 'For people, e.g. "Chrome on macOS".',
+      required: true,
+    },
+    lastSeenAt: { type: "Date", description: "The last sign-in from the device.", required: true },
+    expiresAt: {
+      type: "Date",
+      description: "After this, a sign-in from the device alerts again.",
+      required: true,
+    },
+    createdAt: { type: "Date", description: "The first sign-in from the device.", required: true },
+  }}
+/>
+
+The "This wasn't me" links use better-auth's own `verification` table.
+
+To rename the table or its columns, use the `schema` option:
+
+```ts title="auth.ts"
+securityAlerts({
+  sendAlert: async () => {},
+  schema: {
+    knownDevice: {
+      modelName: "known_devices",
+      fields: { lastSeenAt: "last_seen_at" },
+    },
+  },
+});
+```
+
+## Error codes
+
+Exported as `SECURITY_ALERTS_ERROR_CODES` from both entry points, to
+compare with `error.code`:
+
+```ts
+import { SECURITY_ALERTS_ERROR_CODES } from "@checodo/better-auth-security-alerts/client";
+
+if (error?.code === SECURITY_ALERTS_ERROR_CODES.INVALID_TOKEN.code) {
+  // show "This link is invalid or has expired"
+}
+```
+
+| Code               | Status | When                                                                  |
+| ------------------ | ------ | --------------------------------------------------------------------- |
+| `INVALID_TOKEN`    | 400    | `secureAccount` with an unknown, used, or expired token, or without the `secureAccount` option |
+| `DEVICE_NOT_FOUND` | 404    | `forgetDevice` with an id that isn't one of the user's devices        |
+
+## Options
+
+<TypeTable
+  type={{
+    sendAlert: {
+      type: "(alert: SecurityAlert, request?: Request) => void | Promise<void>",
+      description:
+        "Sends an alert. Runs in the background with `advanced.backgroundTasks`, awaited otherwise. Errors are logged. See [Sending alerts](#sending-alerts).",
+      required: true,
+    },
+    alerts: {
+      type: "Partial<Record<SecurityAlertType, boolean>>",
+      default: "every type on",
+      description: 'Turn single alert types off, e.g. `{ "api-key-created": false }`.',
+    },
+    newDevice: {
+      type: "SecurityAlertsNewDeviceOptions",
+      description: "How sign-ins from new devices are detected. See [New device options](#new-device-options).",
+    },
+    secureAccount: {
+      type: "SecurityAlertsSecureAccountOptions",
+      description:
+        'Adds the "This wasn\'t me" link. Without it, `secureAccountUrl` is `null`. See [Secure account options](#secure-account-options).',
+    },
+    adminActions: {
+      type: "SecurityAlertsAdminActionsOptions",
+      description: "Alerts about changes an admin makes. See [Admin actions options](#admin-actions-options).",
+    },
+    schema: {
+      type: "{ knownDevice?: { modelName?, fields? } }",
+      description: "Rename the `knownDevice` table or its columns. See [Schema](#schema).",
+    },
+  }}
+/>
+
+### New device options
+
+<TypeTable
+  type={{
+    includeIp: {
+      type: "boolean",
+      default: "false",
+      description: "Also tell devices apart by network (/24 for IPv4, /48 for IPv6). Alerts more.",
+    },
+    expiresIn: {
+      type: "number",
+      default: "7776000",
+      description: "A device counts as new again after this many seconds without a sign-in (90 days).",
+    },
+    maxDevices: {
+      type: "number",
+      default: "20",
+      description: "Devices remembered per user; the least recently seen are forgotten first.",
+    },
+    isNewDevice: {
+      type: "({ user, device, ipAddress, userAgent, known, firstSignIn }) => boolean | undefined | Promise<boolean | undefined>",
+      description: "Decide yourself: `true` alerts, `false` doesn't, `undefined` uses the default (`!known && !firstSignIn`).",
+    },
+    getDevice: {
+      type: "(headers: Headers) => { browser: string | null; os: string | null }",
+      description: "Read the browser and OS family yourself. Defaults to the built-in parser.",
+    },
+  }}
+/>
+
+### Secure account options
+
+<TypeTable
+  type={{
+    callbackURL: {
+      type: "string",
+      description: 'Your confirmation page, e.g. `"/secure-account"`. Gets `?token=...` or `?error=INVALID_TOKEN`.',
+      required: true,
+    },
+    expiresIn: {
+      type: "number",
+      default: "604800",
+      description: "How long a link works, in seconds (7 days).",
+    },
+    password: {
+      type: '"block" | "send-reset" | "none"',
+      default: '"block"',
+      description: "What happens to the password. See [What happens to the password](#what-happens-to-the-password).",
+    },
+    resetPasswordURL: {
+      type: "string",
+      description:
+        'Your reset-password page, where the reset link leads (like `redirectTo` of `requestPasswordReset`). Required unless `password` is `"none"`.',
+    },
+    emailChange: {
+      type: '"keep" | "restore"',
+      default: '"keep"',
+      description: "For `email-changed` alerts: keep the new address, or put the old one back. See [Email changes](#email-changes).",
+    },
+    onSecured: {
+      type: "({ user, alert, password, removed, restoredEmail }, request?) => void | Promise<void>",
+      description: "Called after an account was secured. Errors are logged. See [After securing](#after-securing).",
+    },
+  }}
+/>
+
+### Admin actions options
+
+<TypeTable
+  type={{
+    alert: {
+      type: "boolean",
+      default: "true",
+      description: "Alert users about changes an admin makes to their account.",
+    },
+    showActor: {
+      type: "boolean",
+      default: "true",
+      description: 'Say in the alert that an admin did it (`details.actor: "admin"`). With `false`, `details.actor` is always `null`.',
+    },
+  }}
+/>

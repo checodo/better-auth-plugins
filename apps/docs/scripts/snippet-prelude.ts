@@ -16,6 +16,8 @@ import { blocklist } from "@checodo/better-auth-blocklist";
 import { blocklistClient } from "@checodo/better-auth-blocklist/client";
 import { referral } from "@checodo/better-auth-referral";
 import { referralClient } from "@checodo/better-auth-referral/client";
+import { securityAlerts } from "@checodo/better-auth-security-alerts";
+import { securityAlertsClient } from "@checodo/better-auth-security-alerts/client";
 import { waitlist } from "@checodo/better-auth-waitlist";
 import { waitlistClient } from "@checodo/better-auth-waitlist/client";
 import type { GenericEndpointContext } from "better-auth";
@@ -46,6 +48,11 @@ export {
   referral,
 } from "@checodo/better-auth-referral";
 export { referralClient } from "@checodo/better-auth-referral/client";
+export {
+  SECURITY_ALERTS_ERROR_CODES,
+  securityAlerts,
+} from "@checodo/better-auth-security-alerts";
+export { securityAlertsClient } from "@checodo/better-auth-security-alerts/client";
 export { WAITLIST_ERROR_CODES, waitlist } from "@checodo/better-auth-waitlist";
 export { waitlistClient } from "@checodo/better-auth-waitlist/client";
 export { betterAuth } from "better-auth";
@@ -65,6 +72,7 @@ export const auth = betterAuth({
     magicLink({ sendMagicLink: async () => {} }),
     emailOTP({ sendVerificationOTP: async () => {} }),
     auditLog(),
+    securityAlerts({ sendAlert: async () => {} }),
   ],
 });
 
@@ -76,6 +84,7 @@ export const authClient = createAuthClient({
     referralClient(),
     authenticationClient(),
     auditLogClient(),
+    securityAlertsClient(),
     magicLinkClient(),
     emailOTPClient(),
   ],
