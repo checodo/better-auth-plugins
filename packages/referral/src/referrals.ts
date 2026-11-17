@@ -178,12 +178,14 @@ function recordCompleted(referral: Referral): Promise<void> {
 }
 
 /**
- * Records in the audit log that `onReferralCompleted` failed for the last
- * time: after `rewardRetry.maxAttempts` calls, the referral isn't retried,
- * and its reward is never granted unless someone steps in. Once per
- * referral: only one caller makes each attempt (see `claimRewardAttempt`).
+ * Records in the audit log that `onReferralCompleted` failed on its last
+ * attempt: after `rewardRetry.maxAttempts` calls, the referral isn't
+ * retried, and its reward is never granted unless someone steps in. Once
+ * each time a referral's attempts run out: only one caller makes each
+ * attempt (see `claimRewardAttempt`). Raising `maxAttempts` later retries
+ * it, and another last failure is recorded again.
  */
-export async function recordRewardFailed(
+async function recordRewardFailed(
   options: Pick<ResolvedReferralOptions, "rewardRetry">,
   referral: Referral,
 ): Promise<void> {
@@ -200,9 +202,41 @@ export async function recordRewardFailed(
 }
 
 /**
- * Calls `onReferralCompleted` for a referral that was just completed, and
- * records it as rewarded once the call returns without an error. A call
- * that fails (or never finishes) is retried by `retryReferralRewards`.
+ * One call of `onReferralCompleted` for `referral`, whose attempt has
+ * been counted: marks it rewarded when the call returns without an error,
+ * or records a last failed attempt. Errors are logged, never thrown.
+ * Returns whether the referral is now rewarded. Used for the first call
+ * and by `retryReferralRewards`.
+ */
+export async function attemptReward(
+  adapter: Adapter,
+  logger: AuthContext["logger"],
+  options: ResolvedReferralOptions,
+  referral: Referral,
+): Promise<boolean> {
+  const { onReferralCompleted } = options;
+  if (!onReferralCompleted) return false;
+  try {
+    await onReferralCompleted(referral);
+  } catch (error) {
+    logger.error("[referral] onReferralCompleted threw an error", error);
+    await recordRewardFailed(options, referral);
+    return false;
+  }
+  try {
+    await markRewarded(adapter, referral.id);
+    return true;
+  } catch (error) {
+    logger.error("[referral] failed to record that onReferralCompleted succeeded", error);
+    return false;
+  }
+}
+
+/**
+ * Calls `onReferralCompleted` for a referral that was just completed (in
+ * the background when `advanced.backgroundTasks` is configured), see
+ * `attemptReward`. A call that fails (or never finishes) is retried by
+ * `retryReferralRewards`.
  */
 async function deliverReward(
   adapter: Adapter,
@@ -210,16 +244,8 @@ async function deliverReward(
   options: ResolvedReferralOptions,
   referral: Referral,
 ): Promise<void> {
-  const { onReferralCompleted } = options;
-  if (!onReferralCompleted) return;
-  await runCallback(
-    context,
-    "referral",
-    "onReferralCompleted",
-    () => onReferralCompleted(referral),
-    () => markRewarded(adapter, referral.id),
-    () => recordRewardFailed(options, referral),
-  );
+  if (!options.onReferralCompleted) return;
+  await context.runInBackgroundOrAwait(attemptReward(adapter, context.logger, options, referral));
 }
 
 /**

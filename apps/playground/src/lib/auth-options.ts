@@ -21,11 +21,28 @@ import { admin, organization, username } from "better-auth/plugins";
  */
 const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
 
+/**
+ * `BETTER_AUTH_SECRET`, or in development a fixed secret so sessions
+ * survive restarts. Anyone can read that one in this repository, so a
+ * production server refuses to start without the variable. `next build`
+ * (which CI runs) loads this file too and may go without it.
+ */
+function playgroundSecret(): string {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (secret) return secret;
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PHASE !== "phase-production-build"
+  ) {
+    throw new Error("Set BETTER_AUTH_SECRET: the playground's development secret is public.");
+  }
+  return "playground-secret-for-local-development-only";
+}
+
 export const authOptions = {
   appName: "better-auth-plugins playground",
   baseURL,
-  // Development only: a fixed secret so sessions survive restarts.
-  secret: process.env.BETTER_AUTH_SECRET || "playground-secret-for-local-development-only",
+  secret: playgroundSecret(),
   database: new DatabaseSync("playground.db"),
   emailAndPassword: { enabled: true },
   user: {

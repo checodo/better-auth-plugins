@@ -17,6 +17,7 @@ import {
   deleteEntry,
   deleteStaleUnconfirmedEntries,
   findEntryByEmail,
+  findEntryById,
   findEntryByInviteCodeHash,
   findEntryByTokenHash,
   updateEntryIf,
@@ -209,11 +210,28 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
           [{ field: "status", value: "unconfirmed" }, sameToken],
           { status: "pending", confirmedAt: new Date() },
         );
-        if (!confirmed) return ctx.json({ success: true });
+        if (!confirmed) {
+          // Deleted meanwhile (its link expired, the cleanup removed it):
+          // nothing was confirmed, so don't answer as if it had been.
+          if (!(await findEntryById(adapter, entry.id))) {
+            throw APIError.from("BAD_REQUEST", WAITLIST_ERROR_CODES.INVALID_TOKEN);
+          }
+          return ctx.json({ success: true });
+        }
+        // A second record of the confirmation, apart from the entry (and
+        // tamper-evident with the audit log's hash chain). Nobody is signed in.
+        const recordConfirmed = () =>
+          recordAuditEvent({
+            type: "waitlist.confirmed",
+            severity: "low",
+            userId: null,
+            actorUserId: null,
+            metadata: { entryId: confirmed.id, email: confirmed.email },
+          });
         if (await isOverfilled(adapter)) {
           // Back to unconfirmed, with the link's expiry unchanged. Only if
           // nothing else (an admin's approval) changed the entry since.
-          await updateEntryIf(
+          const undone = await updateEntryIf(
             adapter,
             entry.id,
             [{ field: "status", value: "pending" }, sameToken],
@@ -223,17 +241,15 @@ export function createJoinEndpoints(options: ResolvedWaitlistOptions) {
               updatedAt: new Date(entry.updatedAt),
             },
           );
-          throw APIError.from("FORBIDDEN", WAITLIST_ERROR_CODES.WAITLIST_FULL);
+          if (undone) throw APIError.from("FORBIDDEN", WAITLIST_ERROR_CODES.WAITLIST_FULL);
+          // An admin moved the entry on meanwhile (approved or rejected it):
+          // the confirmation stands, with its `confirmedAt` and its event.
+          // What follows a join (onJoin, autoApprove, the invite) is the
+          // admin's action now.
+          await recordConfirmed();
+          return ctx.json({ success: true });
         }
-        // A second record of the confirmation, apart from the entry (and
-        // tamper-evident with the audit log's hash chain). Nobody is signed in.
-        await recordAuditEvent({
-          type: "waitlist.confirmed",
-          severity: "low",
-          userId: null,
-          actorUserId: null,
-          metadata: { entryId: confirmed.id, email: confirmed.email },
-        });
+        await recordConfirmed();
         await completeJoin(ctx.context, options, confirmed, ctx.body.token);
         return ctx.json({ success: true });
       },

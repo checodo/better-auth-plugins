@@ -5,7 +5,7 @@ import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api
 import * as z from "zod";
 import { REFERRAL_ERROR_CODES } from "../error-codes";
 import { MAX_STEP_LENGTH } from "../options";
-import { recordRewardFailed, recordStep } from "../referrals";
+import { attemptReward, recordStep } from "../referrals";
 import {
   claimRewardAttempt,
   countReferrals,
@@ -13,7 +13,6 @@ import {
   findUsers,
   listDueRewards,
   listReferrals,
-  markRewarded,
   stepsByReferral,
 } from "../store";
 import type { Referral, ReferralWithSteps, ResolvedReferralOptions } from "../types";
@@ -234,19 +233,7 @@ export function createReferralEndpoints(options: ResolvedReferralOptions) {
           // null: another call of this endpoint is retrying it.
           if (!claimed) continue;
           attempted += 1;
-          try {
-            await onReferralCompleted(claimed);
-          } catch (error) {
-            logger.error("[referral] onReferralCompleted threw an error", error);
-            await recordRewardFailed(options, claimed);
-            continue;
-          }
-          try {
-            await markRewarded(adapter, claimed.id);
-            rewarded += 1;
-          } catch (error) {
-            logger.error("[referral] failed to record that onReferralCompleted succeeded", error);
-          }
+          if (await attemptReward(adapter, logger, options, claimed)) rewarded += 1;
         }
         return ctx.json({ attempted, rewarded });
       },

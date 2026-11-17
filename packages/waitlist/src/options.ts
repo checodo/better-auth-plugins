@@ -6,10 +6,16 @@ const DEFAULT_INVITE_EXPIRES_IN = 60 * 60 * 24 * 7;
 const DEFAULT_CONFIRMATION_EXPIRES_IN = 60 * 60 * 24 * 2;
 const DEFAULT_SWEEP_INTERVAL = 60 * 60;
 const DAY = 86_400_000;
+/**
+ * Longest duration an option may set, in days (about 100 years): a cutoff
+ * further back would fall outside the range of a `Date`.
+ */
+const MAX_DAYS = 36_500;
 
-function assertPositiveNumber(name: string, value: number | undefined) {
-  if (value !== undefined && !(Number.isFinite(value) && value > 0)) {
-    throw new Error(`[waitlist] "${name}" must be a positive number, got ${value}.`);
+function assertPositiveNumber(name: string, value: number | undefined, max = Infinity) {
+  if (value !== undefined && !(Number.isFinite(value) && value > 0 && value <= max)) {
+    const range = max === Infinity ? "a positive number" : `a positive number up to ${max}`;
+    throw new Error(`[waitlist] "${name}" must be ${range}, got ${value}.`);
   }
 }
 
@@ -27,10 +33,12 @@ export function resolveOptions(options: WaitlistOptions): ResolvedWaitlistOption
   if (options.confirmationExpiresIn === 0) {
     throw new Error("[waitlist] `confirmationExpiresIn` must be greater than 0.");
   }
+  // In seconds; also a cutoff into the past (expired unconfirmed entries).
+  assertPositiveNumber("confirmationExpiresIn", options.confirmationExpiresIn, MAX_DAYS * 86_400);
 
   const { rejected, registered, sweepInterval } = options.retention ?? {};
-  assertPositiveNumber("retention.rejected", rejected);
-  assertPositiveNumber("retention.registered", registered);
+  assertPositiveNumber("retention.rejected", rejected, MAX_DAYS);
+  assertPositiveNumber("retention.registered", registered, MAX_DAYS);
   assertPositiveNumber("retention.sweepInterval", sweepInterval);
 
   const confirmEmail = options.confirmEmail ?? true;
