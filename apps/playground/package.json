@@ -16,6 +16,7 @@
     "@checodo/better-auth-authentication": "workspace:*",
     "@checodo/better-auth-blocklist": "workspace:*",
     "@checodo/better-auth-referral": "workspace:*",
+    "@checodo/better-auth-security-alerts": "workspace:*",
     "@checodo/better-auth-waitlist": "workspace:*",
     "better-auth": "catalog:",
     "geist": "^1.9.2",

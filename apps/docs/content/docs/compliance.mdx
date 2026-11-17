@@ -42,7 +42,7 @@ For each plugin: the controls it **can contribute to**, how, and what is
 | SOC 2     | AICPA Trust Services Criteria 2017 (TSP section 100)                      | `CC6.1`, `P4.2`, ...          |
 | ISO 27001 | ISO/IEC 27001:2022, Annex A (titles as in ISO/IEC 27002:2022)             | `A.8.15`, ...                 |
 | GDPR      | Regulation (EU) 2016/679                                                  | `Art. 32`, `Art. 5(1)(e)`, ... |
-| NIST      | SP 800-63B-4, Digital Identity Guidelines: Authentication (2025), passwords only | `§3.1.1.2`, ...       |
+| NIST      | SP 800-63B-4, Digital Identity Guidelines: Authentication (2025), passwords and account notifications | `§3.1.1.2`, `§4.6`, ... |
 
 The SOC 2, GDPR, and NIST IDs were checked against the published texts
 in November 2026. ISO standards aren't freely available: check the ISO
@@ -72,6 +72,7 @@ qualified adviser.
 | [Authentication](#authentication) | CC6.1                                  | A.5.16, A.8.5                                 | Art. 5(1)(c)                      | -                 |
 | [Blocklist](#blocklist)           | CC6.1, CC6.2, CC6.6                    | A.5.16, A.5.17, A.8.5                         | Art. 32                           | §3.1.1.2          |
 | [Referral](#referral)             | -                                      | -                                             | Art. 5(1)(c), 17                  | -                 |
+| [Security alerts](#security-alerts) | CC7.2, CC7.3, CC7.4                  | A.5.17, A.5.26, A.8.16                        | Art. 32                           | §4.1.2.1, §4.2, §4.3, §4.6 |
 | [Waitlist](#waitlist)             | CC6.2, P2.1                            | A.5.16, A.5.34                                | Art. 5(1)(e), 7, 17               | -                 |
 
 The referral plugin isn't a security control. It is listed for the
@@ -215,6 +216,41 @@ Left to you:
   contain personal data.
 - **Say in your privacy policy** that referrals are recorded, if you pay
   rewards or show them.
+
+## Security alerts
+
+The [security alerts](/docs/security-alerts) plugin tells users about
+sign-ins from new devices and changes to their credentials, and lets them
+lock an intruder out with a "This wasn't me" link.
+
+| Control                                                          | How the plugin can contribute                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| SOC 2 CC7.2 (monitors for anomalies), ISO A.8.16 (Monitoring activities) | Sign-ins from devices not seen before, and changes to passwords, email addresses, passkeys, two-factor, linked accounts, and API keys, are reported to the account owner, who can tell an anomaly from a legitimate change |
+| SOC 2 CC7.3 (evaluates security events), CC7.4 (responds to security incidents), ISO A.5.26 (Response to information security incidents) | The ["This wasn't me"](/docs/security-alerts#this-wasnt-me) link signs out every session and blocks the password, a first containment step the user can take without waiting for support; with the audit log, `security.account-secured` records it |
+| ISO A.5.17 (Authentication information), NIST §4.3, §3.1.1.2     | With `password: "block"`, a password reported as compromised stops working and has to be reset |
+| NIST §4.1.2.1 (binding an additional authenticator), §4.2 (account recovery), §4.6 (account notifications) | Alerts when a passkey is added, when a password reset is requested and done, and when the email address changes (to the old address), sent by your own mail or SMS, outside the request that made the change |
+| GDPR Art. 32(1)(b)                                               | Telling users about changes to their account can support the ongoing confidentiality and integrity of their accounts |
+
+Left to you:
+
+- **Send the alerts.** The plugin decides when to alert; `sendAlert` is
+  your code. Make it reliable, and watch the `sendAlert threw an error`
+  log lines (or `security.alert-sent` events with `status: "failure"`).
+- **Instructions and contact.** NIST §4.6 asks for clear instructions,
+  including contact information, in case the user doesn't recognize the
+  event. Put them in your alert template, next to the link.
+- **More than one notification address.** NIST §4.6 asks for at least two
+  per account; the plugin sends to the account's email (the old one for
+  `email-changed`). A second address or a phone number is yours to add in
+  `sendAlert`.
+- **Respond to reports.** A secured account is a reported incident: look
+  at it (the audit log helps), and decide whether more is needed.
+- **Not a breach notification.** An alert tells a user about their own
+  account. It isn't the communication to data subjects of GDPR Art. 34,
+  nor a notification to the supervisory authority (Art. 33).
+- **Device data.** `knownDevice` holds a keyed hash and a label like
+  "Chrome on macOS" per device, deleted with the user. List it in your
+  records of processing, see [Personal data](/docs/database#personal-data).
 
 ## Waitlist
 

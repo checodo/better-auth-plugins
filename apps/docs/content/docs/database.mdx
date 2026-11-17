@@ -53,6 +53,7 @@ waitlist({
 | [Authentication](/docs/authentication) | None: users and accounts are better-auth's own         | -                                          |
 | [Blocklist](/docs/blocklist)         | `blocklistRule`                                          | [Schema](/docs/blocklist#schema)           |
 | [Referral](/docs/referral)           | `referralCode`, `referral`, `referralStep`, `referralSlot` | [Schema](/docs/referral#schema)          |
+| [Security alerts](/docs/security-alerts) | `knownDevice`; links in better-auth's `verification` | [Schema](/docs/security-alerts#schema) |
 | [Waitlist](/docs/waitlist)           | `waitlistEntry`                                          | [Schema](/docs/waitlist#schema)            |
 
 The audit log can keep its events elsewhere instead, with its `storage`
@@ -71,6 +72,7 @@ stores about people, and what happens to it when a user is deleted.
 | `referral`      | The referrer's and the referred user's ids                                        | Deleted with either user                                   |
 | `referralStep`  | Step `metadata` your server passes                                                | Deleted with its referral                                  |
 | `referralSlot`  | The referrer's user id (only with `maxReferralsPerUser`)                          | Deleted with the user or its referral                      |
+| `knownDevice`   | User id; a keyed hash of browser, OS (and network), a label like "Chrome on macOS" | Deleted with the user (also without foreign keys)         |
 | `waitlistEntry` | Email, your `metadata`, the approving admin's id                                  | Kept, marked `registered`; delete it with `deleteEntry`    |
 | `user` (authentication) | Placeholder emails (`<account id>@steam.invalid`), names and avatars from the provider | better-auth's own deletion                         |
 

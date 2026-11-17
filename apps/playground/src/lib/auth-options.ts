@@ -4,10 +4,12 @@ import { authentication } from "@checodo/better-auth-authentication";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
 import { referral } from "@checodo/better-auth-referral";
+import { securityAlerts } from "@checodo/better-auth-security-alerts";
 import { waitlist } from "@checodo/better-auth-waitlist";
 import type { BetterAuthOptions } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { admin, organization, username } from "better-auth/plugins";
+import { after } from "next/server";
 
 /**
  * The playground's auth config: a local SQLite file (Node's built-in
@@ -44,7 +46,18 @@ export const authOptions = {
   baseURL,
   secret: playgroundSecret(),
   database: new DatabaseSync("playground.db"),
-  emailAndPassword: { enabled: true },
+  // Callbacks such as sendAlert run after the response; after() keeps
+  // them alive until they finish, also on serverless hosts.
+  advanced: {
+    backgroundTasks: { handler: (task) => after(() => task) },
+  },
+  emailAndPassword: {
+    enabled: true,
+    // Used by the security alerts' "This wasn't me" link; opens /reset-password.
+    sendResetPassword: async ({ user, url }) => {
+      console.info(`[reset-password] ${user.email}: ${url}`);
+    },
+  },
   user: {
     changeEmail: { enabled: true, updateEmailWithoutVerification: true },
   },
@@ -124,6 +137,22 @@ export const authOptions = {
             },
           }
         : {}),
+    }),
+    // Logs the alerts it would send. Sign in from a second browser (or a
+    // private window with another browser's user agent) to get a new-device
+    // alert; its link opens /secure-account.
+    securityAlerts({
+      sendAlert: ({ type, email, details, secureAccountUrl }) => {
+        console.info(
+          `[security-alerts] ${type} to ${email} (${details.device.label}, ${details.actor})${
+            secureAccountUrl ? `; not you? ${secureAccountUrl}` : ""
+          }`,
+        );
+      },
+      secureAccount: {
+        callbackURL: `${baseURL}/secure-account`,
+        resetPasswordURL: `${baseURL}/reset-password`,
+      },
     }),
     username(),
     admin(),

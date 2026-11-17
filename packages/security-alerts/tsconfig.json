@@ -1,0 +1,9 @@
+{
+  "extends": "@repo/tooling/tsconfig/library.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "test", "*.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

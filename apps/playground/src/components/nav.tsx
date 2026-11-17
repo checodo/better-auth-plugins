@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/admin", label: "Blocklist rules" },
   { href: "/waitlist", label: "Waitlist" },
   { href: "/referral", label: "Referral" },
+  { href: "/security-alerts", label: "Security alerts" },
   { href: "/audit-log", label: "Audit log" },
 ];
 
