@@ -147,7 +147,9 @@ export async function claimReferralPlace(
   const referrals = await countReferrals(adapter, { referrerUserId });
   const withoutPlace = Math.max(0, referrals - slots - 1);
   const places = max - withoutPlace;
-  if (places <= 0) return false;
+  // Also counts places above `max` (taken before it was lowered), which
+  // the search below doesn't see.
+  if (places <= 0 || slots >= places) return false;
 
   const taken = await takenSlotKeys(adapter, referrerUserId, places);
   for (let place = 0; place < places; place++) {
