@@ -238,6 +238,65 @@ describe("join", () => {
     expect(stats.pending).toBe(1 + joined);
   });
 
+  it("keeps a confirmation an admin acted on while the waitlist overfilled", async () => {
+    // The confirmation takes a place; before it checks for overfilling,
+    // another entry takes the last place and an admin approves this one.
+    // Undoing the confirmation then doesn't apply: it stands.
+    const { auth, context, join, confirmations, entryFor, storedFor } = await setup({
+      confirmEmail: true,
+      maxEntries: 1,
+    });
+    await join("ada@example.com");
+    await join("bob@example.com");
+    const ada = present(await entryFor("ada@example.com"), "ada");
+    const bob = present(await entryFor("bob@example.com"), "bob");
+    const update = context.adapter.update.bind(context.adapter);
+    vi.spyOn(context.adapter, "update").mockImplementation(async (data) => {
+      const result = await update(data);
+      if ((data.update as { status?: string }).status === "pending") {
+        vi.mocked(context.adapter.update).mockRestore();
+        await update({
+          model: "waitlistEntry",
+          where: [{ field: "id", value: bob.id }],
+          update: { status: "pending" },
+        });
+        await update({
+          model: "waitlistEntry",
+          where: [{ field: "id", value: ada.id }],
+          update: { status: "approved" },
+        });
+      }
+      return result;
+    });
+
+    const token = present(confirmations[0], "ada's confirmation").token;
+    await expect(auth.api.confirmWaitlistEmail({ body: { token } })).resolves.toEqual({
+      success: true,
+    });
+    expect((await entryFor("ada@example.com"))?.status).toBe("approved");
+    expect((await storedFor("ada@example.com")).confirmedAt).toBeInstanceOf(Date);
+  });
+
+  it("refuses a confirmation whose entry was deleted while it was checked", async () => {
+    // The link was valid when read, then the cleanup deleted the expired
+    // entry before the confirmation was written.
+    const { auth, context, join, confirmations, entryFor } = await setup({ confirmEmail: true });
+    await join("ada@example.com");
+    const ada = present(await entryFor("ada@example.com"), "ada");
+    const update = context.adapter.update.bind(context.adapter);
+    vi.spyOn(context.adapter, "update").mockImplementation(async (data) => {
+      vi.mocked(context.adapter.update).mockRestore();
+      await context.adapter.deleteMany({
+        model: "waitlistEntry",
+        where: [{ field: "id", value: ada.id }],
+      });
+      return update(data);
+    });
+
+    const token = present(confirmations[0], "ada's confirmation").token;
+    await expectError(auth.api.confirmWaitlistEmail({ body: { token } }), 400, "INVALID_TOKEN");
+  });
+
   it("holds maxEntries when confirmations race for the last place", async () => {
     const { auth, adminHeaders, join, confirmations } = await setup({
       confirmEmail: true,

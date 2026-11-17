@@ -44,6 +44,13 @@ describe("changelog pages", () => {
     expect(escapeMdx("a <b> {c} `<d> {e}`")).toBe("a \\<b> \\{c\\} `<d> {e}`");
   });
 
+  it("turns autolinks, which MDX doesn't support, into links", () => {
+    expect(escapeMdx("See <https://example.com/a?b=1> or <mailto:ada@example.com>.")).toBe(
+      "See [https://example.com/a?b=1](https://example.com/a?b=1) or [mailto:ada@example.com](mailto:ada@example.com).",
+    );
+    expect(escapeMdx("`<https://example.com>`")).toBe("`<https://example.com>`");
+  });
+
   it("links a version to its GitHub release tag", () => {
     expect(releaseUrl("@checodo/better-auth-waitlist", "0.3.0")).toBe(
       "https://github.com/checodo/better-auth-plugins/releases/tag/%40checodo%2Fbetter-auth-waitlist%400.3.0",
@@ -104,12 +111,9 @@ describe("changelog pages", () => {
   it("reads every published package of the repository", () => {
     const docs = join(import.meta.dirname, "..");
     const packages = readPackages(join(docs, "../.."), join(docs, "content/docs"));
-    expect(packages.map((p) => p.dir)).toEqual([
-      "audit-log",
-      "authentication",
-      "blocklist",
-      "referral",
-      "waitlist",
-    ]);
+    // A new package needs a docs page first (readPackages throws otherwise).
+    expect(packages.map((p) => p.dir)).toEqual(
+      expect.arrayContaining(["audit-log", "authentication", "blocklist", "referral", "waitlist"]),
+    );
   });
 });

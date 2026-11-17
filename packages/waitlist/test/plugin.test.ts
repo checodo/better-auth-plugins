@@ -52,6 +52,22 @@ describe("options", () => {
     );
   });
 
+  it("rejects durations that reach outside the range of a date", () => {
+    // 1e9 days back is before the earliest `Date`: every cleanup would fail.
+    expect(() => resolveOptions({ ...base, retention: { rejected: 1e9 } })).toThrow(
+      /retention\.rejected.*up to 36500/,
+    );
+    expect(() => resolveOptions({ ...base, retention: { registered: 36_501 } })).toThrow(
+      /retention\.registered/,
+    );
+    expect(() => resolveOptions({ ...base, confirmationExpiresIn: 1e15 })).toThrow(
+      /confirmationExpiresIn/,
+    );
+    expect(resolveOptions({ ...base, retention: { rejected: 36_500 } }).retention.rejected).toBe(
+      36_500 * 86_400_000,
+    );
+  });
+
   it("requires sendConfirmationEmail while double opt-in is on, as it is by default", () => {
     expect(() => resolveOptions({})).toThrow(/sendConfirmationEmail/);
     expect(resolveOptions({ sendConfirmationEmail: () => {} }).confirmEmail).toBe(true);

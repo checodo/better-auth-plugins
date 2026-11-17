@@ -286,7 +286,9 @@ const { attempted, rewarded } = await auth.api.retryReferralRewards({
   `listAllReferrals` (`rewardStatus` and `rewardAttempts` are in each
   referral) to look into them. With the [audit log](/docs/audit-log),
   the last failed call is also recorded as `referral.reward-failed`
-  (severity `high`, once per referral), so its `onEvent` can alert you.
+  (severity `high`), once each time a referral's attempts run out, so
+  its `onEvent` can alert you. Raising `maxAttempts` later retries those
+  referrals, and records another event if they fail again.
   A last call that never finishes isn't recorded.
 - Concurrent retries don't call the callback twice for the same attempt:
   each takes the referral with a conditional update first.

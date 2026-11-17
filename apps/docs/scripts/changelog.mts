@@ -31,12 +31,18 @@ const GENERATED =
 
 /**
  * Escapes what MDX would read as JSX or an expression (`<`, `{`, `}`) in
- * Markdown text, leaving inline code alone.
+ * Markdown text, leaving inline code alone. Autolinks (`<https://…>`),
+ * which MDX doesn't support, become links.
  */
 export function escapeMdx(line: string): string {
   return line
-    .split(/(`+[^`]*`+)/)
-    .map((part, index) => (index % 2 === 1 ? part : part.replace(/[<{}]/g, (char) => `\\${char}`)))
+    .split(/(`+[^`]*`+|<(?:https?|mailto):[^<>\s]+>)/)
+    .map((part, index) => {
+      if (index % 2 === 0) return part.replace(/[<{}]/g, (char) => `\\${char}`);
+      if (part.startsWith("`")) return part;
+      const url = part.slice(1, -1);
+      return `[${url}](${url})`;
+    })
     .join("");
 }
 

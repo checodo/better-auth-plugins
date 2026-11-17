@@ -276,8 +276,10 @@ waitlist({
   `requireInviteCode`, or better-auth's
   [`requireEmailVerification`](https://better-auth.com/docs/concepts/email)
   so the account can't be used without access to the inbox. Social sign-in
-  (Google, GitHub, ...) is safe either way: the provider has verified the
-  email.
+  is only as safe as the provider's email: Google and GitHub return
+  addresses they have verified, but some providers can return an address
+  nobody verified (multi-tenant Microsoft Entra ID, custom OAuth or OIDC
+  providers). Use `requireInviteCode` with those.
 </Callout>
 
 With `requireInviteCode: true`, the invite code has to come with the
