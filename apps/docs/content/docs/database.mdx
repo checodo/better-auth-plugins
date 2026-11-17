@@ -5,7 +5,8 @@ description: The tables each plugin adds, how to create them, and the personal d
 
 Plugins that store data declare their tables through better-auth's schema
 system, exactly like the official plugins. Every database adapter works,
-and the better-auth CLI creates the tables.
+and the better-auth CLI creates the tables. The tests run on SQLite, and
+the tests of concurrent requests also on PostgreSQL, MySQL, and MongoDB.
 
 ## Create the tables
 

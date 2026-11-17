@@ -1,4 +1,4 @@
-import { testDatabase } from "@repo/tooling/test-helpers";
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import { admin, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
@@ -32,6 +32,7 @@ async function setup(options: ReferralOptions = {}) {
     { ...testDatabase(), disableTestUser: true, clientOptions: { plugins: [referralClient()] } },
   );
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const { test } = context;
 
   /** A saved user with session headers, optionally with a role. */

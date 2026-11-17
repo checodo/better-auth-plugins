@@ -1,5 +1,5 @@
 import type { BetterAuthPlugin } from "@better-auth/core";
-import { testDatabase } from "@repo/tooling/test-helpers";
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import { admin, anonymous, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
@@ -55,6 +55,7 @@ async function setup(options: WaitlistOptions = {}, extraPlugins: BetterAuthPlug
     { ...testDatabase(), disableTestUser: true, clientOptions: { plugins: [waitlistClient()] } },
   );
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const { test } = context;
   const adminUser = await test.saveUser(test.createUser({ email: ADMIN_EMAIL, role: "admin" }));
   const adminHeaders = await test.getAuthHeaders({ userId: adminUser.id });
