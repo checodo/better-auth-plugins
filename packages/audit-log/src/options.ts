@@ -1,12 +1,18 @@
 import { resolveAdminOptions } from "@repo/plugin-utils/admin";
 import { createFail } from "@repo/plugin-utils/options";
-import type { AuditEventSeverity, AuditLogOptions, ResolvedAuditLogOptions } from "./types";
+import type {
+  AuditEventSeverity,
+  AuditLogDestinationEntry,
+  AuditLogOptions,
+  ResolvedAuditLogOptions,
+  ResolvedDestination,
+} from "./types";
 
 /** Longest event type. */
 export const MAX_TYPE_LENGTH = 64;
 const SEVERITIES: readonly AuditEventSeverity[] = ["low", "medium", "high", "critical"];
 
-const fail = createFail("audit-log");
+const fail: (message: string) => never = createFail("audit-log");
 
 export function isValidEventType(type: string): boolean {
   return type.length <= MAX_TYPE_LENGTH && /^[a-z0-9][a-z0-9._-]*$/i.test(type);
@@ -16,7 +22,10 @@ export function isValidEventType(type: string): boolean {
  * Compiles `events` patterns into a matcher: exact types, or `group.*`
  * for every type starting with `group.`.
  */
-export function compileEventFilter(patterns: readonly string[]): (type: string) => boolean {
+export function compileEventFilter(
+  patterns: readonly string[],
+  option = "events",
+): (type: string) => boolean {
   const exact = new Set<string>();
   const prefixes: string[] = [];
   for (const pattern of patterns) {
@@ -25,10 +34,62 @@ export function compileEventFilter(patterns: readonly string[]): (type: string) 
     } else if (isValidEventType(pattern)) {
       exact.add(pattern);
     } else {
-      fail(`Invalid event pattern ${JSON.stringify(pattern)} in "events".`);
+      fail(`Invalid event pattern ${JSON.stringify(pattern)} in "${option}".`);
     }
   }
   return (type) => exact.has(type) || prefixes.some((prefix) => type.startsWith(prefix));
+}
+
+const MAX_BATCH_SIZE = 1000;
+const MAX_BATCH_WAIT = 60_000;
+const DEFAULT_TIMEOUT = 10_000;
+const MAX_TIMEOUT = 300_000;
+
+const isIntegerIn = (value: unknown, min: number, max: number): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+
+function resolveDestinations(
+  destinations: readonly AuditLogDestinationEntry[] | undefined,
+): ResolvedDestination[] {
+  if (destinations === undefined) return [];
+  if (!Array.isArray(destinations)) fail('"destinations" must be an array.');
+  const names = new Set<string>();
+  return destinations.map((destination, index) => {
+    const name = destination?.name;
+    if (typeof name !== "string" || name.trim() === "") {
+      fail(`"destinations[${index}].name" must be a non-empty string.`);
+    }
+    if (names.has(name)) fail(`Two destinations are named ${JSON.stringify(name)}.`);
+    names.add(name);
+    const option = `destinations "${name}"`;
+    if (typeof destination.send !== "function") fail(`"send" of ${option} must be a function.`);
+    if (destination.transform !== undefined && typeof destination.transform !== "function") {
+      fail(`"transform" of ${option} must be a function.`);
+    }
+    const size = destination.batch?.size ?? 1;
+    if (!isIntegerIn(size, 1, MAX_BATCH_SIZE)) {
+      fail(`"batch.size" of ${option} must be a whole number from 1 to ${MAX_BATCH_SIZE}.`);
+    }
+    const wait = destination.batch?.wait ?? (size === 1 ? 0 : 1000);
+    if (!isIntegerIn(wait, 0, MAX_BATCH_WAIT)) {
+      fail(`"batch.wait" of ${option} must be 0 to ${MAX_BATCH_WAIT} milliseconds.`);
+    }
+    const timeout = destination.timeout ?? DEFAULT_TIMEOUT;
+    if (!isIntegerIn(timeout, 1, MAX_TIMEOUT)) {
+      fail(`"timeout" of ${option} must be 1 to ${MAX_TIMEOUT} milliseconds.`);
+    }
+    return {
+      name,
+      events: destination.events
+        ? compileEventFilter(destination.events, `${option}.events`)
+        : null,
+      transform: destination.transform,
+      send: destination.send as ResolvedDestination["send"],
+      size,
+      wait,
+      timeout,
+    };
+  });
 }
 
 /** Resolves defaults and validates the options once, at plugin creation. */
@@ -61,6 +122,9 @@ export function resolveOptions(options: AuditLogOptions): ResolvedAuditLogOption
     if (!(typeof sweepInterval === "number" && sweepInterval > 0)) {
       fail(`"retention.sweepInterval" must be a positive number of seconds, got ${sweepInterval}.`);
     }
+    if (options.storage && typeof options.storage.deleteOlderThan !== "function") {
+      fail('"retention" needs a storage that can delete events ("deleteOlderThan").');
+    }
     retention = { days, sweepInterval };
   }
 
@@ -85,6 +149,7 @@ export function resolveOptions(options: AuditLogOptions): ResolvedAuditLogOption
     beforeLog: options.beforeLog,
     onEvent: options.onEvent,
     storage: options.storage,
+    destinations: resolveDestinations(options.destinations),
     retention,
     hashChain,
     ...resolveAdminOptions(options),

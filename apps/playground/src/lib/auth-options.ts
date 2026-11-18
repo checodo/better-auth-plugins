@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { auditLog } from "@checodo/better-auth-audit-log";
+import { consoleDestination } from "@checodo/better-auth-audit-log/destinations";
 import { authentication } from "@checodo/better-auth-authentication";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
@@ -161,9 +162,8 @@ export const authOptions = {
     // nextCookies() goes later.
     auditLog({
       retention: { days: 30 },
-      onEvent: ({ type, status, userId }) => {
-        console.info(`[audit-log] ${type} ${status}${userId ? ` for ${userId}` : ""}`);
-      },
+      // Every event as one JSON line in the dev server's output.
+      destinations: [consoleDestination()],
     }),
     nextCookies(),
   ],

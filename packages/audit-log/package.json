@@ -35,6 +35,10 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     },
+    "./destinations": {
+      "types": "./dist/destinations.d.ts",
+      "default": "./dist/destinations.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",

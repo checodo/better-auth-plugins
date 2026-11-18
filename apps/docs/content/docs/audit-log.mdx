@@ -15,9 +15,9 @@ history; admins can see everyone's.
   `admin` plugin, with the admin as the actor.
 - Events outlive the users they mention, `user-deleted` included.
 - Optional hash chain that shows when events were changed or deleted.
-- Pluggable: change or drop events with `beforeLog`, forward them with
-  `onEvent`, store them elsewhere with `storage`, delete old ones with
-  `retention`.
+- Pluggable: change or drop events with `beforeLog`, send them to a SIEM,
+  a log service, or a webhook with `destinations`, store them elsewhere
+  with `storage`, delete old ones with `retention`.
 
 ## Installation
 
@@ -328,22 +328,121 @@ separately.
 
 ### Forwarding events
 
-`onEvent` gets every stored event, for example to send it to a SIEM or to
-alert on critical ones:
+`destinations` sends every stored event to more places besides the
+`auditEvent` table: a SIEM, a log service, a webhook. Each destination
+has a `name` (for logged errors) and a `send` function that always gets
+an array of events:
 
 ```ts title="auth.ts"
 auditLog({
-  onEvent: async (event) => {
-    if (event.severity === "critical") await alertSecurityTeam(event);
-  },
+  destinations: [
+    {
+      name: "alerts",
+      events: ["sign-in", "admin.*"], // optional, like the plugin's `events`
+      send: async (batch) => {
+        for (const event of batch) {
+          if (event.severity === "critical") await alertSecurityTeam(event);
+        }
+      },
+    },
+  ],
 });
 ```
+
+`httpDestination` and `consoleDestination`, from
+`@checodo/better-auth-audit-log/destinations`, cover the common cases
+without a vendor SDK:
+
+```ts title="auth.ts"
+import { consoleDestination, httpDestination } from "@checodo/better-auth-audit-log/destinations";
+
+auditLog({
+  destinations: [
+    httpDestination({
+      name: "siem",
+      url: "https://siem.example.com/intake",
+      headers: { authorization: `Bearer ${process.env.SIEM_TOKEN}` },
+      format: "ndjson", // or "json": one array per request (the default)
+      batch: { size: 100, wait: 2000 },
+    }),
+    // One JSON line per event on stdout, for development.
+    consoleDestination(),
+  ],
+});
+```
+
+With `secret`, `httpDestination` signs every request the
+[Standard Webhooks](https://www.standardwebhooks.com) way
+(`webhook-id`, `webhook-timestamp`, and `webhook-signature` headers), so
+the receiver can check it with any Standard Webhooks library. The secret
+is a base64 key of 24 to 64 bytes, optionally prefixed with `whsec_`. A
+response other than 2xx counts as failed.
+
+**Transform.** `transform` converts each event for one destination (ECS,
+OpenTelemetry, a flat row...), or returns `null` to skip it there.
+`beforeLog` stays the step before storage, for every destination.
+Annotate `send`'s `batch` with what `transform` returns:
+
+```ts title="auth.ts"
+auditLog({
+  destinations: [
+    {
+      name: "flat",
+      transform: (event) =>
+        event.status === "failure" ? { at: event.createdAt, type: event.type } : null,
+      send: async (batch: { at: Date; type: string }[]) => {
+        await saveFailures(batch);
+      },
+    },
+  ],
+});
+```
+
+**Batching.** By default every event is sent on its own, at once. With
+`batch: { size, wait }`, events wait in memory until `size` of them are
+together (at most 1,000), or the first has waited `wait` milliseconds
+(default `1000`, at most 60,000).
+
+**Delivery is best effort.** Sending runs in the background and never
+slows down or fails the request. A failing, throwing, or slow `send`
+(aborted after `timeout`, default 10 seconds, through the `signal` it
+gets) is logged with the destination's name and not retried; other
+destinations are not affected. Events waiting in a batch are lost if the
+process stops. So:
+
+- On serverless platforms, configure better-auth's
+  `advanced.backgroundTasks` (e.g. `waitUntil`): the request that starts
+  a batch then keeps the function alive until the batch is sent.
+- Before a long-running server stops, call the server-only
+  `flushAuditDestinations`, which sends what is waiting and waits for
+  running sends:
+
+```ts title="server.ts"
+process.on("SIGTERM", async () => {
+  await auth.api.flushAuditDestinations();
+  process.exit(0);
+});
+```
+
+If every event must arrive, keep the database storage as the record and
+let the destination catch up from it.
+
+`onEvent` is still there: it is called with every stored event and
+awaited before the request goes on (errors are logged). Prefer
+`destinations` for forwarding.
 
 ### Storage
 
 Events go to the `auditEvent` table by default. To keep them elsewhere,
 pass an object with `write`, `read`, and `deleteOlderThan`; the table is
-then not created. `memoryStorage()` keeps events in memory, for tests:
+then not created. Only `write` is required, for a log service that can't
+be queried: without `read`, `listEvents` answers `READ_NOT_SUPPORTED`;
+without `deleteOlderThan`, `retention` is refused at startup and
+`deleteExpiredAuditEvents` answers `DELETE_NOT_SUPPORTED`. To keep the
+events in your database _and_ send them elsewhere, use
+[`destinations`](#forwarding-events) instead.
+
+`memoryStorage()` keeps events in memory, for tests:
 
 ```ts title="auth.test.ts"
 import { auditLog, memoryStorage } from "@checodo/better-auth-audit-log";
@@ -448,7 +547,7 @@ What it does and doesn't protect against:
   no links and aren't checked.
 
 It needs the default database storage; with custom `storage`, the plugin
-refuses to start.
+refuses to start. Destinations get the events, not the chain.
 
 ### Running on several servers
 
@@ -467,11 +566,14 @@ to it and read from it. A few things are kept in each server process:
   get increasing timestamps, so a sign-up lists before its sign-in. Events
   from different servers in the same millisecond can list in either order.
 - **`memoryStorage()`** keeps events per process. It is for tests.
+- **Destination batches** are kept per process, so each process sends
+  its own batches.
 
 ### When things fail
 
 The audit log never breaks authentication: if storing an event fails, or
-`onEvent` throws, the error is logged and the request goes on. If
+`onEvent` or a destination throws, the error is logged and the request
+goes on. If
 `beforeLog` throws, the event is dropped and the error logged, so a broken
 pseudonymization never stores raw data. With better-auth's
 `advanced.backgroundTasks`, events are stored in the background, so they
@@ -567,6 +669,8 @@ with `error.code`:
 | `METADATA_TOO_LARGE`                             | 400    | `recordAuditEvent` with more than 4,000 characters of JSON   |
 | `RETENTION_NOT_CONFIGURED`                       | 400    | `deleteExpiredAuditEvents` without `days` or `retention`     |
 | `HASH_CHAIN_NOT_ENABLED`                         | 400    | `verifyAuditChain` without the `hashChain` option            |
+| `READ_NOT_SUPPORTED`                             | 501    | `listEvents` with a custom `storage` that has no `read`      |
+| `DELETE_NOT_SUPPORTED`                           | 501    | `deleteExpiredAuditEvents` with a custom `storage` that has no `deleteOlderThan` |
 
 ## Options
 
@@ -597,10 +701,14 @@ with `error.code`:
     },
     onEvent: {
       type: "(event) => void | Promise<void>",
-      description: "Called with every stored event. Errors are logged.",
+      description: "Called with every stored event, awaited. Errors are logged.",
+    },
+    destinations: {
+      type: "AuditLogDestination[]",
+      description: "More places to send every stored event to, in the background. See [Forwarding events](#forwarding-events).",
     },
     storage: {
-      type: "{ write, read, deleteOlderThan }",
+      type: "{ write, read?, deleteOlderThan? }",
       default: "the auditEvent table",
       description: "Where to keep events. See [Storage](#storage).",
     },
@@ -631,3 +739,57 @@ with `error.code`:
     },
   }}
 />
+
+Each entry of `destinations`:
+
+<TypeTable
+  type={{
+    name: { type: "string", required: true, description: "Names the destination in logged errors. Unique." },
+    send: {
+      type: "(batch, { signal }) => void | Promise<void>",
+      required: true,
+      description: "Delivers a batch, always an array. Throw on failure.",
+    },
+    events: {
+      type: "string[]",
+      default: "every recorded event",
+      description: "Event types to send, like the plugin's `events`.",
+    },
+    transform: {
+      type: "(event) => T | null | Promise<T | null>",
+      description: "Converts an event for this destination; `null` skips it here.",
+    },
+    batch: {
+      type: "{ size?: number; wait?: number }",
+      default: "{ size: 1, wait: 0 }",
+      description: "Events per `send` (1 to 1,000), and milliseconds to wait for more (default 1000 with `size` above 1).",
+    },
+    timeout: {
+      type: "number",
+      default: "10000",
+      description: "Milliseconds before `send` is aborted and counted as failed.",
+    },
+  }}
+/>
+
+`httpDestination` takes `name` (default `"http"`), `events`, `transform`,
+`batch`, and `timeout` like above, plus:
+
+<TypeTable
+  type={{
+    url: { type: "string | URL", required: true, description: "Where to POST the events (`https:` or `http:`)." },
+    format: {
+      type: '"json" | "ndjson"',
+      default: '"json"',
+      description: "One JSON array per request, or one JSON object per line.",
+    },
+    headers: { type: "Record<string, string>", description: "Extra request headers." },
+    secret: {
+      type: "string",
+      description: "Signs requests the Standard Webhooks way. A base64 key of 24 to 64 bytes, optionally `whsec_...`.",
+    },
+  }}
+/>
+
+`consoleDestination` takes `name` (default `"console"`), `events`,
+`transform`, `batch`, and `timeout`.

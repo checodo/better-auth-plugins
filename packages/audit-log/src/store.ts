@@ -49,7 +49,7 @@ function filters(query: Omit<AuditEventQuery, "limit" | "offset">): Where[] {
  */
 export function databaseStorage(
   baseAdapter: AuthContext["adapter"],
-): AuditLogStorage & { readByIds: (ids: string[]) => Promise<Map<string, AuditEvent>> } {
+): Required<AuditLogStorage> & { readByIds: (ids: string[]) => Promise<Map<string, AuditEvent>> } {
   const adapter = () => getCurrentAdapter(baseAdapter);
   return {
     async write(event: AuditEventInput) {

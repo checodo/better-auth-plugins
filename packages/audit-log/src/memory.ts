@@ -11,7 +11,7 @@ import type { AuditEvent, AuditEventQuery, AuditLogStorage } from "./types";
  * storage.events; // every stored event
  * ```
  */
-export function memoryStorage(): AuditLogStorage & { readonly events: AuditEvent[] } {
+export function memoryStorage(): Required<AuditLogStorage> & { readonly events: AuditEvent[] } {
   const events: AuditEvent[] = [];
   const matches = (event: AuditEvent, query: AuditEventQuery) =>
     (!query.userId || event.userId === query.userId) &&

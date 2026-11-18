@@ -1,6 +1,7 @@
 import type { AuthContext } from "@better-auth/core";
 import { getIP } from "@better-auth/core/utils/ip";
 import { createChain } from "./chain";
+import { createDispatcher } from "./dispatcher";
 import { databaseStorage } from "./store";
 import type {
   AuditEvent,
@@ -42,6 +43,7 @@ export type Recorder = ReturnType<typeof createRecorder>;
 export function createRecorder(options: ResolvedAuditLogOptions) {
   let lastSweep = 0;
   const chain = options.hashChain ? createChain(options.hashChain.secret) : null;
+  const destinations = createDispatcher(options.destinations);
   let lastCreatedAt = 0;
   /**
    * The current time, but never the same as or earlier than the previous
@@ -84,9 +86,14 @@ export function createRecorder(options: ResolvedAuditLogOptions) {
     };
   }
 
-  /** Deletes events created before `date`, and their links. */
-  async function deleteOlderThan(ctx: Pick<Context, "adapter">, date: Date): Promise<number> {
-    const deleted = await storageFor(ctx).deleteOlderThan(date);
+  /** Deletes events created before `date`, and their links. `null`: the storage can't delete. */
+  async function deleteOlderThan(
+    ctx: Pick<Context, "adapter">,
+    date: Date,
+  ): Promise<number | null> {
+    const storage = storageFor(ctx);
+    if (!storage.deleteOlderThan) return null;
+    const deleted = await storage.deleteOlderThan(date);
     if (chain) await chain.deleteOlderThan(ctx, date);
     return deleted;
   }
@@ -106,9 +113,10 @@ export function createRecorder(options: ResolvedAuditLogOptions) {
   }
 
   /**
-   * Builds, filters, and stores an event, then calls `onEvent`. Returns
-   * `null` if the event isn't recorded (`events`, `beforeLog`). Storage
-   * errors are thrown; `onEvent` errors are logged.
+   * Builds, filters, and stores an event, then hands it to the
+   * destinations (in the background) and calls `onEvent`. Returns `null`
+   * if the event isn't recorded (`events`, `beforeLog`). Storage errors
+   * are thrown; destination and `onEvent` errors are logged.
    */
   async function recordNow(
     ctx: Context,
@@ -128,6 +136,7 @@ export function createRecorder(options: ResolvedAuditLogOptions) {
     }
     const stored = await storageFor(ctx).write(event);
     if (chain) await chain.link(ctx, stored);
+    if (destinations.enabled) destinations.dispatch(ctx, stored);
     if (options.onEvent) {
       try {
         await options.onEvent(stored);
@@ -156,5 +165,5 @@ export function createRecorder(options: ResolvedAuditLogOptions) {
     await ctx.runInBackgroundOrAwait(task);
   }
 
-  return { record, recordNow, storageFor, isRecorded, deleteOlderThan, chain };
+  return { record, recordNow, storageFor, isRecorded, deleteOlderThan, chain, destinations };
 }
