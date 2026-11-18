@@ -1,5 +1,6 @@
 import type { AuthContext } from "@better-auth/core";
 import type { Where } from "@better-auth/core/db/adapter";
+import { findAll } from "@repo/plugin-utils/pagination";
 import type { Referral, ReferralCode, ReferralSlot, ReferralStatus, ReferralStep } from "./types";
 
 /** The adapter methods used here; satisfied by the base adapter and a transaction adapter. */
@@ -295,7 +296,8 @@ export async function stepsByReferral(
 ): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>(referralIds.map((id) => [id, []]));
   if (referralIds.length === 0) return result;
-  const steps = await adapter.findMany<ReferralStep>({
+  // Every step of these referrals: a plain findMany returns at most 100 rows.
+  const steps = await findAll<ReferralStep>(adapter, {
     model: "referralStep",
     where: [{ field: "referralId", value: referralIds, operator: "in" }],
     sortBy: { field: "completedAt", direction: "asc" },
@@ -329,6 +331,7 @@ export async function findUsers(
   const users = await adapter.findMany<{ id: string; name: string; email: string }>({
     model: "user",
     where: [{ field: "id", value: ids, operator: "in" }],
+    limit: ids.length,
   });
   return new Map(users.map((user) => [user.id, user]));
 }

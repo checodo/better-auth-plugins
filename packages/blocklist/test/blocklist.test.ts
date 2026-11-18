@@ -665,3 +665,31 @@ describe("database rule cache", () => {
     await expectBlocked(fresh.signUp("c@cached.example"), "EMAIL_NOT_ALLOWED");
   });
 });
+
+describe("many stored rules", () => {
+  it("checks every stored rule, not only the first 100", async () => {
+    const { auth } = await getTestInstance(
+      { emailAndPassword: { enabled: true }, plugins: [blocklist()] },
+      { disableTestUser: true },
+    );
+    const context = await auth.$context;
+    const start = Date.now();
+    for (let i = 0; i < 150; i++) {
+      await context.adapter.create({
+        model: "blocklistRule",
+        data: {
+          target: "email",
+          type: "domain",
+          value: `blocked-${i}.example`,
+          createdAt: new Date(start + i),
+        },
+      });
+    }
+    await expectBlocked(
+      auth.api.signUpEmail({
+        body: { email: "eve@blocked-149.example", password: "password1234", name: "Eve" },
+      }),
+      "EMAIL_NOT_ALLOWED",
+    );
+  });
+});

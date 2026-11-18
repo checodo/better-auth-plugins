@@ -1,5 +1,6 @@
 import type { AuthContext, GenericEndpointContext } from "@better-auth/core";
 import type { User } from "@better-auth/core/db";
+import { findAll } from "@repo/plugin-utils/pagination";
 import { makeSignature } from "better-auth/crypto";
 import type { Alerter } from "./alerts";
 import { headersOf, PLUGIN_ID } from "./alerts";
@@ -22,7 +23,8 @@ export interface KnownDevice {
 type Adapter = AuthContext["adapter"];
 
 export function findDevices(adapter: Adapter, userId: string): Promise<KnownDevice[]> {
-  return adapter.findMany<KnownDevice>({
+  // Every device, also with `maxDevices` above 100: a plain findMany stops at 100.
+  return findAll<KnownDevice>(adapter, {
     model: MODEL,
     where: [{ field: "userId", value: userId }],
   });

@@ -79,6 +79,8 @@ export function databaseStorage(
       const rows = await (await adapter()).findMany<Row>({
         model: "auditEvent",
         where: [{ field: "id", value: ids, operator: "in" }],
+        // Without it, adapters return at most 100 rows.
+        limit: ids.length,
       });
       return new Map(rows.map((row) => [row.id, toEvent(row)]));
     },

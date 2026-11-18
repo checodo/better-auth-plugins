@@ -192,6 +192,12 @@ describe("hash chain", () => {
     expect(await verify()).toMatchObject({ valid: true, checked: 3 });
   });
 
+  it("verifies more links than an adapter returns at once", async () => {
+    const { record, verify } = await setup();
+    for (let i = 0; i < 150; i++) await record(`event-${i}`);
+    expect(await verify()).toMatchObject({ valid: true, checked: 150, problems: [] });
+  });
+
   it("keeps up with many concurrent events", async () => {
     const { record, verify } = await setup();
     await Promise.all(Array.from({ length: 20 }, (_, i) => record(`event-${i}`)));
