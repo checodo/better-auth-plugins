@@ -7,7 +7,6 @@ import { AUDIT_LOG_ERROR_CODES } from "../error-codes";
 import { isValidEventType, MAX_TYPE_LENGTH } from "../options";
 import type { Recorder } from "../recorder";
 import { MAX_METADATA_LENGTH } from "../recorder";
-import { databaseStorage } from "../store";
 import type { ResolvedAuditLogOptions } from "../types";
 
 /** Most events one list request returns. */
@@ -178,29 +177,6 @@ export function createEventEndpoints(options: ResolvedAuditLogOptions, recorder:
       async (ctx) => {
         await recorder.destinations.flush();
         return ctx.json({ success: true });
-      },
-    ),
-    /**
-     * Server only: re-computes the hash chain and reports changed, deleted,
-     * and unchained events. Reads every link, so run it from a job, not on
-     * every request.
-     */
-    verifyAuditChain: createAuthEndpoint(
-      {
-        method: "POST",
-        metadata: {
-          openapi: {
-            description: "Verify the audit log's hash chain. Server only",
-          },
-        },
-      },
-      async (ctx) => {
-        const { chain } = recorder;
-        if (!chain) {
-          throw APIError.from("BAD_REQUEST", AUDIT_LOG_ERROR_CODES.HASH_CHAIN_NOT_ENABLED);
-        }
-        const storage = databaseStorage(ctx.context.adapter);
-        return ctx.json(await chain.verify(ctx.context, (ids) => storage.readByIds(ids)));
       },
     ),
   } satisfies BetterAuthPlugin["endpoints"];

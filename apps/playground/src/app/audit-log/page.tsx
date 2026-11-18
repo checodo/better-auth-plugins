@@ -59,8 +59,8 @@ export default function AuditLog() {
       <h1 className="text-2xl font-semibold">Audit log</h1>
       <p className="text-sm text-muted-foreground">
         Sign-ins (try a wrong password too), sign-ups, password and email changes, and admin actions
-        are recorded automatically. Each event is also logged in the server output by{" "}
-        <Code>onEvent</Code>.
+        are recorded automatically. Each event is also sent to the server output by{" "}
+        <Code>consoleDestination()</Code>.
       </p>
 
       <Card
@@ -125,6 +125,26 @@ export default function AuditLog() {
         <Button type="button" variant="secondary" onClick={load}>
           Refresh
         </Button>
+      </Card>
+
+      <Card
+        title="Export (admins)"
+        description={
+          <>
+            <Code>GET /audit-log/export</Code> downloads up to 1,000 events, newest first; the{" "}
+            <Code>x-next-cursor</Code> response header continues it.
+          </>
+        }
+      >
+        <div className="flex flex-wrap gap-4 text-sm">
+          <a className="underline" href="/api/auth/audit-log/export?format=csv">
+            Download CSV
+          </a>
+          <a className="underline" href="/api/auth/audit-log/export?format=ndjson">
+            Download NDJSON
+          </a>
+        </div>
+        <Hint>Other users get a 403.</Hint>
       </Card>
     </RequireSession>
   );

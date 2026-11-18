@@ -45,6 +45,7 @@ describe("hash chain", () => {
       lastHash: chain[2]?.hash,
       problems: [],
       unchainedEvents: 0,
+      nextSequence: null,
     });
   });
 
@@ -244,11 +245,5 @@ describe("hash chain options and access", () => {
     await expect(auth.api.verifyAuditChain({})).rejects.toMatchObject({
       body: { code: "HASH_CHAIN_NOT_ENABLED" },
     });
-  });
-
-  it("verification is not reachable over HTTP", async () => {
-    const { client } = await setup();
-    const result = await client.$fetch("/audit-log/verify-chain", { method: "POST" });
-    expect(result.error?.status).toBe(404);
   });
 });

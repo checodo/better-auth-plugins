@@ -503,6 +503,7 @@ const result = await auth.api.verifyAuditChain({});
 //   lastHash: "9f2c...",
 //   problems: [{ sequence: 1204, eventId: "...", problem: "hash-mismatch" }],
 //   unchainedEvents: 0,
+//   nextSequence: null,                 // more to check? see below
 // }
 ```
 
@@ -513,10 +514,30 @@ const result = await auth.api.verifyAuditChain({});
 | `sequence-gap`  | Links before this one were deleted, usually with their events  |
 | `broken-link`   | The link doesn't continue the previous link's hash             |
 
-`unchainedEvents` counts events stored since the first link that have no
-link: written into the table directly, or whose link failed (that error is
-logged). `verifyAuditChain` is server only and reads every link, so run it
-from a scheduled job, not on requests.
+`unchainedEvents` counts events stored since the first checked link that
+have no link: written into the table directly, or whose link failed (that
+error is logged).
+
+On the server, `verifyAuditChain` reads every link unless you pass a
+`limit`, so run it from a scheduled job, not on requests. To check a long
+chain in parts, pass `limit` and continue with the result's
+`nextSequence` as `afterSequence` until it is `null`. Each part checks
+that it continues the link before it; `unchainedEvents` is counted on the
+last part:
+
+```ts title="verify-audit-log.ts"
+let afterSequence: number | undefined;
+do {
+  const part = await auth.api.verifyAuditChain({ body: { afterSequence, limit: 5000 } });
+  if (!part.valid) console.error("Audit chain problems", part.problems);
+  afterSequence = part.nextSequence ?? undefined;
+} while (afterSequence !== undefined);
+```
+
+Over HTTP, admins can run the same check with
+`POST /audit-log/verify-chain` (at most 10,000 links per request,
+rate limited), e.g. from an admin page. Without headers,
+`auth.api.verifyAuditChain` needs no session: it's your server code.
 
 What it does and doesn't protect against:
 
@@ -548,6 +569,41 @@ What it does and doesn't protect against:
 
 It needs the default database storage; with custom `storage`, the plugin
 refuses to start. Destinations get the events, not the chain.
+
+### Export
+
+Admins can export events as NDJSON (one JSON event per line, the default)
+or CSV, for an auditor, a spreadsheet, or another system. It takes the
+same filters as `listEvents`, returns events newest first, and is rate
+limited:
+
+```ts title="export-audit-log.ts"
+const response = await auth.api.exportAuditEvents({
+  query: { format: "csv", from: new Date("2026-01-01"), limit: 10_000 },
+});
+const csv = await response.text();
+const next = response.headers.get("x-next-cursor"); // more events? see below
+```
+
+Each request returns up to `limit` events (default 1,000, at most
+10,000). When there are more, the `x-next-cursor` response header holds a
+cursor: pass it as `cursor`, with the same filters, for the next page.
+Events recorded while you export are newer than the export, so they never
+shift a page. CSV has a header row on the first page only, `metadata` as
+a JSON string, and a `'` before cells that a spreadsheet would run as a
+formula (starting with `=`, `+`, `-`, `@`).
+
+Over HTTP, `GET /audit-log/export` is for admins, and the response is a
+file download (`audit-events.ndjson` or `audit-events.csv`):
+
+```ts title="admin-page.ts"
+window.location.href = "/api/auth/audit-log/export?format=csv";
+```
+
+Without headers, `auth.api.exportAuditEvents` needs no session: it's your
+server code, e.g. a job that copies events to cold storage. It needs a
+storage with `read` (`READ_NOT_SUPPORTED` otherwise). Users can still
+list their own events with `listEvents`.
 
 ### Running on several servers
 
@@ -596,9 +652,15 @@ const { data } = await authClient.auditLog.listEvents({
 | Endpoint                      | Client                          | Server                              |
 | ----------------------------- | ------------------------------- | ----------------------------------- |
 | `GET /audit-log/list-events`  | `authClient.auditLog.listEvents` | `auth.api.listAuditEvents`          |
+| `GET /audit-log/export`       | `authClient.auditLog.export`    | `auth.api.exportAuditEvents`        |
+| `POST /audit-log/verify-chain` | `authClient.auditLog.verifyChain` | `auth.api.verifyAuditChain`       |
 | (server only)                 | -                               | `auth.api.recordAuditEvent`         |
 | (server only)                 | -                               | `auth.api.deleteExpiredAuditEvents` |
-| (server only)                 | -                               | `auth.api.verifyAuditChain`         |
+| (server only)                 | -                               | `auth.api.flushAuditDestinations`   |
+
+Export and verification are for admins only over HTTP (`403` for other
+users, `401` without a session), and rate limited to 10 requests a
+minute; change that with better-auth's `rateLimit.customRules`.
 
 ## Schema
 
@@ -669,7 +731,10 @@ with `error.code`:
 | `METADATA_TOO_LARGE`                             | 400    | `recordAuditEvent` with more than 4,000 characters of JSON   |
 | `RETENTION_NOT_CONFIGURED`                       | 400    | `deleteExpiredAuditEvents` without `days` or `retention`     |
 | `HASH_CHAIN_NOT_ENABLED`                         | 400    | `verifyAuditChain` without the `hashChain` option            |
-| `READ_NOT_SUPPORTED`                             | 501    | `listEvents` with a custom `storage` that has no `read`      |
+| `READ_NOT_SUPPORTED`                             | 501    | `listEvents` or `export` with a custom `storage` that has no `read` |
+| `YOU_ARE_NOT_ALLOWED_TO_EXPORT_EVENTS`           | 403    | `export` for users who aren't admins                          |
+| `YOU_ARE_NOT_ALLOWED_TO_VERIFY_THE_CHAIN`        | 403    | `verify-chain` for users who aren't admins                    |
+| `INVALID_CURSOR`                                 | 400    | `export` with a `cursor` that isn't from `x-next-cursor`      |
 | `DELETE_NOT_SUPPORTED`                           | 501    | `deleteExpiredAuditEvents` with a custom `storage` that has no `deleteOlderThan` |
 
 ## Options

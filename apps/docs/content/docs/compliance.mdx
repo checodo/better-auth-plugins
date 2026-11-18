@@ -106,6 +106,7 @@ account changes, and admin actions, and the events of the other plugins.
 | ISO A.8.15 (Logging), A.5.28 (Collection of evidence), GDPR Art. 32(1)(b) | Events in their own table. The optional [hash chain](/docs/audit-log#hash-chain), off by default, can help detect certain changes or deletions of recorded events when enabled. [`destinations`](/docs/audit-log#forwarding-events) can keep a copy in a separately controlled log store, which can help when the application database itself is compromised |
 | SOC 2 P4.2, P4.3, ISO A.8.10 (Information deletion), GDPR Art. 5(1)(e) | The opt-in [`retention`](/docs/audit-log#retention) deletes eligible audit events when cleanup runs. This can support retention and deletion controls, but backups and other copies remain your responsibility |
 | ISO A.8.11 (Data masking), GDPR Art. 5(1)(c)                     | `captureIp` and `captureUserAgent` turn data off; [`beforeLog`](/docs/audit-log#privacy) can pseudonymize it; metadata under recognized secret-related keys is redacted (see below) |
+| ISO A.5.28 (Collection of evidence)                                | Admins can [export](/docs/audit-log#export) events as NDJSON or CSV for auditors and evidence requests, and [verify the hash chain](/docs/audit-log#hash-chain) over HTTP or from a job |
 | GDPR Art. 15                                                     | Users can list their own audit events. This may support an access request, but it does not provide a complete export of all personal data processed by the organization |
 
 Left to you:
@@ -300,8 +301,9 @@ Things the plugins don't do yet, so you don't find out in an audit:
 - **Deleting a user doesn't delete everything.** Waitlist entries and
   audit events stay; referral rows rely on foreign keys. The
   [Personal data](/docs/database#personal-data) table lists every table.
-- **No export endpoint for audit events.** Page through
-  `auth.api.listAuditEvents` to hand events to an auditor or to a user.
+- **No self-service export for users.** Admins can
+  [export](/docs/audit-log#export) audit events; users can only list
+  their own, so an access request still needs an admin.
 - **No account lockout.** Failed sign-ins are recorded and rate limited
   per IP address, not counted per account.
 

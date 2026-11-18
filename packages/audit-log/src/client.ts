@@ -25,6 +25,7 @@ export const auditLogClient = () => {
     $InferServerPlugin: {} as AuditLogPlugin,
     pathMethods: {
       "/audit-log/list-events": "GET",
+      "/audit-log/export": "GET",
     },
     $ERROR_CODES: AUDIT_LOG_ERROR_CODES,
   } satisfies BetterAuthClientPlugin;
