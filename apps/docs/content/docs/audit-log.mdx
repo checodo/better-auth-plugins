@@ -376,7 +376,9 @@ With `secret`, `httpDestination` signs every request the
 (`webhook-id`, `webhook-timestamp`, and `webhook-signature` headers), so
 the receiver can check it with any Standard Webhooks library. The secret
 is a base64 key of 24 to 64 bytes, optionally prefixed with `whsec_`. A
-response other than 2xx counts as failed.
+response other than 2xx counts as failed, and so does a redirect: it is
+not followed, so the events and your headers never go to a URL you
+didn't configure.
 
 **Transform.** `transform` converts each event for one destination (ECS,
 OpenTelemetry, a flat row...), or returns `null` to skip it there.
@@ -522,8 +524,9 @@ On the server, `verifyAuditChain` reads every link unless you pass a
 `limit`, so run it from a scheduled job, not on requests. To check a long
 chain in parts, pass `limit` and continue with the result's
 `nextSequence` as `afterSequence` until it is `null`. Each part checks
-that it continues the link before it; `unchainedEvents` is counted on the
-last part:
+that it continues the link before it, and reports a `sequence-gap` if that
+link was deleted (unless no older link is left, as after retention);
+`unchainedEvents` is counted on the last part:
 
 ```ts title="verify-audit-log.ts"
 let afterSequence: number | undefined;

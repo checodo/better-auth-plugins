@@ -100,6 +100,8 @@ describe("export", () => {
       'attachment; filename="audit-events.ndjson"',
     );
     expect(all.headers.get("x-next-cursor")).toBeNull();
+    expect(all.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(all.headers.get("cache-control")).toBe("no-store");
     const types = (await all.text())
       .trim()
       .split("\n")
@@ -314,6 +316,34 @@ describe("verify-chain over HTTP", () => {
     expect(result).toMatchObject({
       valid: false,
       problems: [{ sequence: 3, problem: "broken-link" }],
+    });
+  });
+
+  it("reports a deleted link right before a range", async () => {
+    const { auth, context, record } = await setup({ hashChain: true });
+    for (let i = 0; i < 4; i++) await record(`event-${i}`);
+    await context.adapter.delete({
+      model: "auditChain",
+      where: [{ field: "sequence", value: 2 }],
+    });
+    expect(await auth.api.verifyAuditChain({ body: { afterSequence: 2 } })).toMatchObject({
+      valid: false,
+      checked: 2,
+      problems: [{ sequence: 3, problem: "sequence-gap" }],
+    });
+  });
+
+  it("accepts a range whose earlier links retention deleted", async () => {
+    const { auth, context, record } = await setup({ hashChain: true });
+    for (let i = 0; i < 4; i++) await record(`event-${i}`);
+    await context.adapter.deleteMany({
+      model: "auditChain",
+      where: [{ field: "sequence", value: 2, operator: "lte" }],
+    });
+    expect(await auth.api.verifyAuditChain({ body: { afterSequence: 2 } })).toMatchObject({
+      valid: true,
+      checked: 2,
+      problems: [],
     });
   });
 });

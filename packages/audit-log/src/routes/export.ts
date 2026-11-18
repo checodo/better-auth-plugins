@@ -128,6 +128,9 @@ export function createExportEndpoints(options: ResolvedAuditLogOptions, recorder
             format === "csv" ? "text/csv; charset=utf-8" : "application/x-ndjson; charset=utf-8",
           "content-disposition": `attachment; filename="audit-events.${format}"`,
           "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          // Readable by a client on another origin, if the app allows that origin.
+          "access-control-expose-headers": "x-next-cursor",
         });
         if (events.length > 0 && offset + events.length < total) {
           headers.set("x-next-cursor", encodeCursor(nextCursor(events, cursor)));

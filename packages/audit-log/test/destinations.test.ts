@@ -369,6 +369,8 @@ describe("httpDestination", () => {
     expect(requests).toHaveLength(1);
     const request = requests[0] as Request;
     expect(request.method).toBe("POST");
+    // Never follows a redirect with the events and headers.
+    expect(request.redirect).toBe("error");
     expect(request.url).toBe("https://siem.example.com/intake?token=abc");
     expect(request.headers.get("authorization")).toBe("Bearer key");
     expect(request.headers.get("content-type")).toBe("application/json");

@@ -1,4 +1,5 @@
 import { blocklist } from "@checodo/better-auth-blocklist";
+import type { BetterAuthOptions } from "better-auth";
 import type { GithubProfile } from "better-auth/social-providers";
 import { getTestInstance } from "better-auth/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,9 +12,12 @@ import { auditLog } from "../src/index";
  * endpoint is stubbed and the profile comes from `getUserInfo`, so no
  * network is needed; state, cookies, and the callback endpoint are real.
  */
-async function setup(email: string) {
+async function setup(email: string, config: Partial<BetterAuthOptions> = {}) {
+  /** Event types sent to a destination. */
+  const forwarded: string[] = [];
   const { auth } = await getTestInstance(
     {
+      ...config,
       socialProviders: {
         github: {
           clientId: "test-client",
@@ -26,7 +30,17 @@ async function setup(email: string) {
         },
       },
       // The default storage, a database table: what a rolled-back transaction affects.
-      plugins: [blocklist({ email: { domains: ["blocked.test"] } }), auditLog()],
+      plugins: [
+        blocklist({ email: { domains: ["blocked.test"] } }),
+        auditLog({
+          destinations: [
+            {
+              name: "test",
+              send: (batch) => void forwarded.push(...batch.map((event) => event.type)),
+            },
+          ],
+        }),
+      ],
     },
     { disableTestUser: true },
   );
@@ -69,7 +83,7 @@ async function setup(email: string) {
       metadata: row.metadata ? JSON.parse(row.metadata) : null,
     }));
   };
-  return { auth, signInWithGitHub, events };
+  return { auth, signInWithGitHub, events, forwarded };
 }
 
 afterEach(() => {
@@ -78,9 +92,11 @@ afterEach(() => {
 
 describe("social sign-in", () => {
   it("records the sign-up and sign-in of a new user, with the provider as method", async () => {
-    const { signInWithGitHub, events } = await setup("ada@example.com");
+    const { auth, signInWithGitHub, events, forwarded } = await setup("ada@example.com");
     const response = await signInWithGitHub();
     expect(response.status).toBe(302);
+    await auth.api.flushAuditDestinations();
+    expect(forwarded).toEqual(["sign-up", "sign-in"]);
     expect(response.headers.get("location")).toContain("/dashboard");
 
     const [signUp] = await events("sign-up");
@@ -101,7 +117,7 @@ describe("social sign-in", () => {
   });
 
   it("records a blocked social sign-up, although its transaction rolls back", async () => {
-    const { signInWithGitHub, events } = await setup("eve@blocked.test");
+    const { auth, signInWithGitHub, events, forwarded } = await setup("eve@blocked.test");
     const response = await signInWithGitHub();
     // better-auth redirects to its error page; no user is created.
     expect(response.headers.get("location")).toContain("error");
@@ -115,5 +131,30 @@ describe("social sign-in", () => {
         }),
       ]),
     );
+    // Destinations get committed events only: not the rolled-back sign-up.
+    await auth.api.flushAuditDestinations();
+    expect(forwarded).toEqual(["blocklist.blocked"]);
+  });
+
+  it("neither stores nor forwards a sign-up whose transaction rolls back", async () => {
+    // The user is created, then the account fails: the whole sign-up rolls
+    // back. better-auth runs after-hooks once the transaction commits.
+    const { auth, signInWithGitHub, events, forwarded } = await setup("ada@example.com", {
+      databaseHooks: {
+        account: {
+          create: {
+            before: async () => {
+              throw new Error("account refused");
+            },
+          },
+        },
+      },
+    });
+    const error = vi.spyOn((await auth.$context).logger, "error").mockImplementation(() => {});
+    await signInWithGitHub();
+    expect(await events("sign-up")).toEqual([]);
+    await auth.api.flushAuditDestinations();
+    expect(forwarded).not.toContain("sign-up");
+    error.mockRestore();
   });
 });

@@ -217,14 +217,21 @@ export function createChain(secretOption: string | undefined) {
     const limit = range.limit ?? Number.POSITIVE_INFINITY;
     let checked = 0;
     let first: AuditChainLink | null = null;
-    // The link before the range, to check that the range continues it.
+    // The link before the range, to check that the range continues it:
+    // the newest one up to `afterSequence`. If that link was deleted, an
+    // older one shows the gap; with none older, retention deleted the
+    // start of the chain, which isn't a problem.
     let previous: AuditChainLink | null =
       range.afterSequence === undefined
         ? null
-        : await adapter.findOne<AuditChainLink>({
-            model: "auditChain",
-            where: [{ field: "sequence", value: range.afterSequence }],
-          });
+        : ((
+            await adapter.findMany<AuditChainLink>({
+              model: "auditChain",
+              where: [{ field: "sequence", value: range.afterSequence, operator: "lte" }],
+              limit: 1,
+              sortBy: { field: "sequence", direction: "desc" },
+            })
+          )[0] ?? null);
     let after = range.afterSequence ?? null;
     let problemCount = 0;
     let more = false;
