@@ -1,6 +1,6 @@
 {
   "name": "@checodo/better-auth-referral",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Referral codes, sign-up attribution, and reward steps for better-auth.",
   "type": "module",
   "license": "MIT",
