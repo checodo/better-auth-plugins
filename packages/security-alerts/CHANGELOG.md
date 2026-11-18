@@ -1,5 +1,11 @@
 # @checodo/better-auth-security-alerts
 
+## 0.2.1
+
+### Patch Changes
+
+- 6fb82ef: With `newDevice.maxDevices` above 100, every known device is now read: the device check and `listDevices` saw at most 100 of a user's devices.
+
 ## 0.2.0
 
 ### Minor Changes
