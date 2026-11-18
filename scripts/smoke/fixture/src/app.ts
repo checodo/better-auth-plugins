@@ -140,6 +140,11 @@ const { events: list } = (await events.json()) as { events: Array<{ type: string
 assert.ok(list.length > 0, "audit-log recorded events");
 await auth.api.flushAuditDestinations();
 assert.ok(forwarded.includes("sign-up"), "audit-log sent events to its destination");
+// audit-log: server code exports without a session; users can't over HTTP.
+const exported = (await auth.api.exportAuditEvents({ query: { format: "csv" } })) as Response;
+assert.ok((await exported.text()).startsWith("id,createdAt,type"), "audit-log exports CSV");
+const notAdmin = await call("/audit-log/export", { cookie });
+assert.equal(notAdmin.status, 403, `audit-log/export: ${await notAdmin.clone().text()}`);
 
 // authentication: Steam builds its sign-in URL without network access.
 const steam = await call("/sign-in/social", {

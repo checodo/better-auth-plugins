@@ -45,8 +45,25 @@ export interface ChainVerification {
   lastHash: string | null;
   /** Up to 100 problems, oldest first. */
   problems: { sequence: number; eventId: string; problem: ChainProblem }[];
-  /** Events stored since the first link that have no link (written around the chain). */
+  /**
+   * Events stored since the first checked link that have no link (written
+   * around the chain). Counted only when the check reaches the newest
+   * link; `0` on earlier pages.
+   */
   unchainedEvents: number;
+  /**
+   * `null` when the check reached the newest link. Otherwise pass it as
+   * `afterSequence` to check the next links.
+   */
+  nextSequence: number | null;
+}
+
+/** Which links one verification checks. */
+export interface ChainRange {
+  /** Start after this link (from a previous `nextSequence`). Defaults to the first link. */
+  afterSequence?: number | undefined;
+  /** Check at most this many links. Defaults to every link. */
+  limit?: number | undefined;
 }
 
 type Context = Pick<AuthContext, "adapter" | "logger" | "secret">;
@@ -182,10 +199,11 @@ export function createChain(secretOption: string | undefined) {
     });
   }
 
-  /** Re-computes every link, oldest first, against the stored events. */
+  /** Re-computes the links of `range` (default: all), oldest first, against the stored events. */
   async function verify(
     ctx: Context,
     readEvents: (ids: string[]) => Promise<Map<string, AuditEvent>>,
+    range: ChainRange = {},
   ): Promise<ChainVerification> {
     const { adapter } = ctx;
     const secret = secretFor(ctx);
@@ -196,15 +214,30 @@ export function createChain(secretOption: string | undefined) {
       }
     };
 
+    const limit = range.limit ?? Number.POSITIVE_INFINITY;
     let checked = 0;
     let first: AuditChainLink | null = null;
-    let previous: AuditChainLink | null = null;
+    // The link before the range, to check that the range continues it.
+    let previous: AuditChainLink | null =
+      range.afterSequence === undefined
+        ? null
+        : await adapter.findOne<AuditChainLink>({
+            model: "auditChain",
+            where: [{ field: "sequence", value: range.afterSequence }],
+          });
+    let after = range.afterSequence ?? null;
     let problemCount = 0;
+    let more = false;
     for (;;) {
+      const pageSize = Math.min(VERIFY_PAGE_SIZE, limit - checked);
+      if (pageSize <= 0) {
+        more = true;
+        break;
+      }
       const links: AuditChainLink[] = await adapter.findMany<AuditChainLink>({
         model: "auditChain",
-        where: previous ? [{ field: "sequence", value: previous.sequence, operator: "gt" }] : [],
-        limit: VERIFY_PAGE_SIZE,
+        where: after === null ? [] : [{ field: "sequence", value: after, operator: "gt" }],
+        limit: pageSize,
         sortBy: { field: "sequence", direction: "asc" },
       });
       if (links.length === 0) break;
@@ -233,12 +266,23 @@ export function createChain(secretOption: string | undefined) {
           problemCount++;
         }
         previous = link;
+        after = link.sequence;
       }
-      if (links.length < VERIFY_PAGE_SIZE) break;
+      if (links.length < pageSize) break;
+    }
+    // The limit was reached: there may be more links.
+    if (more && previous) {
+      const [next] = await adapter.findMany<AuditChainLink>({
+        model: "auditChain",
+        where: [{ field: "sequence", value: previous.sequence, operator: "gt" }],
+        limit: 1,
+        sortBy: { field: "sequence", direction: "asc" },
+      });
+      more = !!next;
     }
 
     let unchainedEvents = 0;
-    if (first && previous) {
+    if (!more && first && previous) {
       // Every event from the first linked one on should have a link.
       const firstEvent = (await readEvents([first.eventId])).get(first.eventId);
       if (firstEvent) {
@@ -254,10 +298,11 @@ export function createChain(secretOption: string | undefined) {
       valid: problemCount === 0 && unchainedEvents === 0,
       checked,
       firstSequence: first?.sequence ?? null,
-      lastSequence: previous?.sequence ?? null,
-      lastHash: previous?.hash ?? null,
+      lastSequence: first ? (previous?.sequence ?? null) : null,
+      lastHash: first ? (previous?.hash ?? null) : null,
       problems,
       unchainedEvents,
+      nextSequence: more && previous ? previous.sequence : null,
     };
   }
 

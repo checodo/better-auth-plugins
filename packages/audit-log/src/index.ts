@@ -8,10 +8,11 @@ import { resolveOptions } from "./options";
 import { createRecordEvent } from "./record-event";
 import { createRecorder } from "./recorder";
 import { createEventEndpoints } from "./routes/events";
+import { createExportEndpoints, exportRateLimit } from "./routes/export";
 import { auditChainSchema, auditLogSchema } from "./schema";
 import type { AuditLogOptions } from "./types";
 
-export type { AuditChainLink, ChainProblem, ChainVerification } from "./chain";
+export type { AuditChainLink, ChainProblem, ChainRange, ChainVerification } from "./chain";
 export { AUDIT_LOG_ERROR_CODES, type AuditLogErrorCode } from "./error-codes";
 export { memoryStorage } from "./memory";
 export type { PluginEventDetails } from "./record-event";
@@ -96,7 +97,12 @@ export const auditLog = (options: AuditLogOptions = {}) => {
             options.schema,
           ),
         }),
-    endpoints: createEventEndpoints(resolved, recorder),
+    endpoints: {
+      ...createEventEndpoints(resolved, recorder),
+      ...createExportEndpoints(resolved, recorder),
+    },
+    // Apps can change this with better-auth's `rateLimit.customRules`.
+    rateLimit: [exportRateLimit],
     hooks: createPathHooks(resolved, recorder),
     $ERROR_CODES: AUDIT_LOG_ERROR_CODES,
     options,
