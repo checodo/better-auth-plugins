@@ -171,6 +171,10 @@ upgraded.
   `mergeSchema(structuredClone(schema), options.schema)` from
   `better-auth/db`, like the `username` plugin. `mergeSchema` changes the
   object it gets, hence the copy.
+- **Reading many rows**: `findMany` without a `limit` returns at most 100
+  rows (better-auth's `defaultFindManyLimit`), with no error. Pass a
+  `limit` (for an `in` list, its length), page through a list endpoint,
+  or read every row with `findAll` from `@repo/plugin-utils/pagination`.
 - **Caching**: data read on hot paths (every sign-up, every keystroke of
   an availability check) is cached with a short TTL and cleared by the
   plugin's own write endpoints. Make the TTL an option; `0` disables it.

@@ -1,4 +1,5 @@
 import type { BetterAuthPlugin } from "@better-auth/core";
+import { findAll } from "@repo/plugin-utils/pagination";
 import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import { admin, anonymous, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
@@ -1322,5 +1323,31 @@ describe("client", () => {
     const { client } = await setup();
     const { error } = await client.waitlist.getStats();
     expect(error?.status).toBe(401);
+  });
+});
+
+describe("findAll on this database", () => {
+  it("reads every row page by page, after the last id", async () => {
+    const { context } = await setup();
+    for (let i = 0; i < 25; i++) {
+      await context.adapter.create({
+        model: "waitlistEntry",
+        data: {
+          email: `person-${i}@example.com`,
+          status: "pending",
+          tokenHash: `token-hash-${i}`,
+          confirmationsSent: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    }
+    const rows = await findAll<{ id: string; email: string }>(
+      context.adapter,
+      { model: "waitlistEntry", where: [{ field: "status", value: "pending" }] },
+      7,
+    );
+    expect(rows).toHaveLength(25);
+    expect(new Set(rows.map((row) => row.email)).size).toBe(25);
   });
 });

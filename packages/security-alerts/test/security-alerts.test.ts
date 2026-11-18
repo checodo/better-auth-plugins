@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/client";
 import { describe, expect, it, vi } from "vitest";
 import { securityAlertsClient } from "../src/client";
+import { findDevices } from "../src/devices";
 import { browser, cookieOf, PASSWORD, setup, UA } from "./helpers";
 
 describe("new-device", () => {
@@ -108,6 +109,28 @@ describe("new-device", () => {
       signIn("ada@example.com", UA.firefoxLinux, {}, "wrong-password"),
     ).rejects.toThrow();
     expect(alerts).toEqual([]);
+  });
+
+  it("reads every device, also beyond 100", async () => {
+    const { signUp, context } = await setup();
+    const { user } = await signUp("ada@example.com");
+    const now = new Date();
+    for (let i = 0; i < 120; i++) {
+      await context.adapter.create({
+        model: "knownDevice",
+        data: {
+          userId: user.id,
+          fingerprint: `fingerprint-${i}`,
+          label: "Chrome on macOS",
+          lastSeenAt: now,
+          expiresAt: new Date(now.getTime() + 86_400_000),
+          createdAt: now,
+        },
+      });
+    }
+    // The adapter's type is narrowed to the test's options.
+    const devices = await findDevices(context.adapter as never, user.id);
+    expect(devices.length).toBeGreaterThan(120);
   });
 
   it("forgets a deleted user's devices", async () => {

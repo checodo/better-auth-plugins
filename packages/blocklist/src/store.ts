@@ -1,4 +1,5 @@
 import type { AuthContext } from "@better-auth/core";
+import { findAll } from "@repo/plugin-utils/pagination";
 import type { BlocklistMatchType, BlocklistTarget, StoredBlocklistRule } from "./types";
 
 /** The adapter methods used here; satisfied by the base adapter and a transaction adapter. */
@@ -10,11 +11,12 @@ export async function listStoredRules(
   adapter: Adapter,
   target?: BlocklistTarget,
 ): Promise<StoredBlocklistRule[]> {
-  return adapter.findMany<StoredBlocklistRule>({
+  // Every rule: a plain findMany returns at most 100 rows.
+  const rules = await findAll<StoredBlocklistRule>(adapter, {
     model: MODEL,
     ...(target ? { where: [{ field: "target", value: target }] } : {}),
-    sortBy: { field: "createdAt", direction: "asc" },
   });
+  return rules.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
 export async function findStoredRule(
