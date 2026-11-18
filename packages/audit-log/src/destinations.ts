@@ -31,8 +31,8 @@ const toBase64 = (bytes: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Ar
 
 /**
  * Sends events to a URL with a POST: a webhook, a SIEM, or a log
- * service's HTTP intake. A response other than 2xx counts as failed (and
- * is logged); there are no retries.
+ * service's HTTP intake. A response other than 2xx, or a redirect,
+ * counts as failed (and is logged); there are no retries.
  *
  * @example
  * ```ts
@@ -73,6 +73,8 @@ export function httpDestination(options: HttpDestinationOptions): AuditLogDestin
           false,
           ["sign"],
         );
+  // Reported by the first `send` that needs the key, not as an unhandled rejection.
+  key?.catch(() => {});
 
   return {
     name: options.name ?? "http",
@@ -102,7 +104,15 @@ export function httpDestination(options: HttpDestinationOptions): AuditLogDestin
         headers.set("webhook-timestamp", timestamp);
         headers.set("webhook-signature", `v1,${toBase64(signature)}`);
       }
-      const response = await fetch(url, { method: "POST", headers, body, signal });
+      // No redirects: they would resend the events and the headers (an API
+      // key) to wherever the receiver points.
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal,
+        redirect: "error",
+      });
       // Free the connection; the body isn't needed.
       await response.body?.cancel().catch(() => {});
       // The origin only: the path or query may carry a token.

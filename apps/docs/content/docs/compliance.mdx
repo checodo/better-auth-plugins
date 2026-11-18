@@ -121,6 +121,11 @@ Left to you:
   legally appropriate; document the period in your privacy policy.
 - **Look at the log.** Recording is not monitoring: alert on critical
   events (`destinations`) and review admin actions regularly.
+- **Destinations receive personal data.** Events carry user ids, IP
+  addresses, user agents, and sometimes email addresses. A SIEM or log
+  service you forward them to is a processor: cover it in your records of
+  processing and data processing agreements, and use `transform` or
+  `beforeLog` to send less.
 - **Check that forwarding works.** Destinations are best effort: failed
   sends are logged, not retried, and events waiting in a batch are lost
   if the process stops. Watch for `[audit-log] destination` errors, and
