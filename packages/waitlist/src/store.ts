@@ -27,6 +27,11 @@ export async function findEntryByEmail(
   });
 }
 
+/** Deletes the entry of `email` (normalized), if there is one. */
+export async function deleteEntryByEmail(adapter: Adapter, email: string): Promise<void> {
+  await adapter.deleteMany({ model: MODEL, where: [{ field: "email", value: email }] });
+}
+
 export async function findEntryByTokenHash(
   adapter: Adapter,
   tokenHash: string,

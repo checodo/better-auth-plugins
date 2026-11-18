@@ -1,4 +1,5 @@
 import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
+import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin, magicLink, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
@@ -943,5 +944,98 @@ describe("client", () => {
 
     const { error } = await client.referral.listAllReferrals({ fetchOptions });
     expect(error?.code).toBe("YOU_ARE_NOT_ALLOWED_TO_LIST_REFERRALS");
+  });
+});
+
+describe("deleted users", () => {
+  /** Rows of `model` that mention `userId` or one of `referralIds`. */
+  const count = (
+    context: Awaited<ReturnType<typeof setup>>["context"],
+    model: string,
+    field: string,
+    value: string,
+  ) => context.adapter.count({ model, where: [{ field, value }] });
+
+  it("erases a deleted referrer's code, referrals, steps, and places", async () => {
+    const { auth, context, referrer, signUp } = await setup({
+      maxReferralsPerUser: 5,
+      steps: ["first-purchase"],
+    });
+    const ada = await referrer();
+    const bob = await signUp("bob@example.com", { referralCode: ada.code });
+    await auth.api.completeReferralStep({
+      body: { userId: bob.user.id, step: "first-purchase" },
+    });
+    const referral = await context.adapter.findOne<Referral>({
+      model: "referral",
+      where: [{ field: "referredUserId", value: bob.user.id }],
+    });
+    expect(referral).not.toBeNull();
+
+    await context.internalAdapter.deleteUser(ada.user.id);
+
+    expect(await count(context, "referralCode", "userId", ada.user.id)).toBe(0);
+    expect(await count(context, "referral", "referrerUserId", ada.user.id)).toBe(0);
+    expect(await count(context, "referralSlot", "referrerUserId", ada.user.id)).toBe(0);
+    expect(await count(context, "referralStep", "referralId", referral?.id ?? "")).toBe(0);
+  });
+
+  it("erases the referral that brought a deleted user, and keeps the referrer's code", async () => {
+    const { context, referrer, signUp } = await setup();
+    const ada = await referrer();
+    const bob = await signUp("bob@example.com", { referralCode: ada.code });
+
+    await context.internalAdapter.deleteUser(bob.user.id);
+
+    expect(await count(context, "referral", "referredUserId", bob.user.id)).toBe(0);
+    expect(await count(context, "referralCode", "userId", ada.user.id)).toBe(1);
+  });
+
+  it("erases them on an adapter without cascading deletes, like MongoDB, however many", async () => {
+    const db: Record<string, Record<string, unknown>[]> = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      referralCode: [],
+      referral: [],
+      referralStep: [],
+      referralSlot: [],
+    };
+    const { auth } = await getTestInstance(
+      {
+        database: memoryAdapter(db),
+        plugins: [referral({ maxReferralsPerUser: 5, steps: ["first-purchase"] }), testUtils()],
+      },
+      { disableTestUser: true },
+    );
+    const context = await auth.$context;
+    const ada = await context.test.saveUser(context.test.createUser({ email: "ada@example.com" }));
+    const { code } = await auth.api.createReferralCode({
+      headers: await context.test.getAuthHeaders({ userId: ada.id }),
+    });
+    // `referralCode` is read from the request body; better-auth's type doesn't list it.
+    const body = { email: "bob@example.com", password: PASSWORD, name: "Bob", referralCode: code };
+    const bob = await auth.api.signUpEmail({ body });
+    await auth.api.completeReferralStep({ body: { userId: bob.user.id, step: "first-purchase" } });
+    expect(db.referral).toHaveLength(1);
+    // More than an adapter returns without a limit (100), and than one round deletes.
+    for (let i = 0; i < 250; i++) {
+      db.referral?.push({
+        id: `referral-${i}`,
+        referrerUserId: ada.id,
+        referredUserId: `user-${i}`,
+        code,
+        status: "pending",
+        createdAt: new Date(),
+      });
+    }
+
+    await context.internalAdapter.deleteUser(ada.id);
+
+    expect(db.referralCode).toEqual([]);
+    expect(db.referral).toEqual([]);
+    expect(db.referralStep).toEqual([]);
+    expect(db.referralSlot).toEqual([]);
   });
 });

@@ -14,7 +14,8 @@
     "./pagination": "./src/pagination.ts",
     "./password-reset": "./src/password-reset.ts",
     "./sign-in": "./src/sign-in.ts",
-    "./user-changes": "./src/user-changes.ts"
+    "./user-changes": "./src/user-changes.ts",
+    "./user-data": "./src/user-data.ts"
   },
   "scripts": {
     "test": "vitest run",
