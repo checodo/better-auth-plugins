@@ -1,10 +1,11 @@
 import type { AuthContext, BetterAuthOptions, GenericEndpointContext } from "@better-auth/core";
 import { getCurrentAdapter } from "@better-auth/core/context";
+import { eraseOnUserDelete } from "@repo/plugin-utils/user-data";
 import { APIError, getOAuthState } from "better-auth/api";
 import { constantTimeEqual } from "better-auth/crypto";
 import { WAITLIST_ERROR_CODES } from "../error-codes";
 import { isInviteValid } from "../invite";
-import { findEntryByEmail, updateEntry } from "../store";
+import { deleteEntryByEmail, findEntryByEmail, updateEntry } from "../store";
 import type { ResolvedWaitlistOptions } from "../types";
 import { isAllowedEmail, normalizeEmail } from "../utils/email";
 import { hashSecret } from "../utils/secret";
@@ -94,6 +95,12 @@ export function createDatabaseHooks(
             inviteExpiresAt: null,
           });
         },
+      },
+      // The entry holds the email address: it goes with the user.
+      delete: {
+        after: eraseOnUserDelete(authContext, "waitlist", "the waitlist entry", async (user) => {
+          if (user.email) await deleteEntryByEmail(authContext.adapter, normalizeEmail(user.email));
+        }),
       },
     },
   };

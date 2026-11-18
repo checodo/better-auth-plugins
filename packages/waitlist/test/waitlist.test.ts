@@ -1351,3 +1351,22 @@ describe("findAll on this database", () => {
     expect(new Set(rows.map((row) => row.email)).size).toBe(25);
   });
 });
+
+describe("deleted users", () => {
+  it("deletes a deleted user's waitlist entry, which holds their email", async () => {
+    const { context, join, approve, signUp, entryFor } = await setup();
+    await join("ada@example.com");
+    await approve("ada@example.com");
+    const { user } = await signUp("ada@example.com");
+    expect(await entryFor("ada@example.com")).toMatchObject({ status: "registered" });
+
+    await context.internalAdapter.deleteUser(user.id);
+
+    expect(
+      await context.adapter.count({
+        model: "waitlistEntry",
+        where: [{ field: "email", value: "ada@example.com" }],
+      }),
+    ).toBe(0);
+  });
+});

@@ -1,5 +1,6 @@
 import type { AuthContext, BetterAuthOptions, GenericEndpointContext } from "@better-auth/core";
 import { getCurrentAdapter, queueAfterTransactionHook } from "@better-auth/core/context";
+import { eraseOnUserDelete } from "@repo/plugin-utils/user-data";
 import { APIError, getOAuthState } from "better-auth/api";
 import { REFERRAL_ERROR_CODES } from "../error-codes";
 import { EMAIL_VERIFIED_STEP } from "../options";
@@ -10,7 +11,12 @@ import {
   recordStep,
   referralCreated,
 } from "../referrals";
-import { createReferral, deleteReferral, findReferralByReferredUserId } from "../store";
+import {
+  createReferral,
+  deleteReferral,
+  eraseUserData,
+  findReferralByReferredUserId,
+} from "../store";
 import type { Referral, ResolvedReferralOptions } from "../types";
 
 export const REFERRAL_CODE_HEADER = "x-referral-code";
@@ -173,6 +179,13 @@ export function createDatabaseHooks(
             ctx.logger.error("[referral] failed to record the email-verified step", error);
           }
         },
+      },
+      // Foreign keys cascade on some databases only (not MongoDB, not
+      // SQLite without `PRAGMA foreign_keys`), so the plugin deletes too.
+      delete: {
+        after: eraseOnUserDelete(authContext, "referral", "the referral data", (user) =>
+          eraseUserData(authContext.adapter, user.id),
+        ),
       },
     },
   };

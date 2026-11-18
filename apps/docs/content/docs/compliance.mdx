@@ -216,12 +216,10 @@ steps toward a reward.
 | Control           | How the plugin can contribute                                                           |
 | ----------------- | --------------------------------------------------------------------------------------- |
 | GDPR Art. 5(1)(c) | Stores user ids, not emails or names. The ids are still personal data, and step metadata is whatever your server passes |
-| GDPR Art. 17      | Codes and referrals are deleted with the user, through foreign keys. This can support erasure; backups, audit logs, and other copies are yours to handle |
+| GDPR Art. 17      | Codes, referrals, steps, and places are deleted with the user, on every adapter. This can support erasure; backups, audit logs, and other copies are yours to handle |
 
 Left to you:
 
-- **Without foreign keys** (MongoDB, some custom adapters), delete a
-  user's referral rows yourself, see [Personal data](/docs/database#personal-data).
 - **Keep step metadata small.** Whatever you pass is stored, and it can
   contain personal data.
 - **Say in your privacy policy** that referrals are recorded, if you pay
@@ -271,6 +269,7 @@ The [waitlist](/docs/waitlist) gates sign-up behind admin approval.
 | SOC 2 CC6.2 (registers and authorizes new users before access), ISO A.5.16 | Every way of creating a user is gated: only approved emails (and what you let through with `allow` or `bypass`) get an account; with the audit log, approvals are recorded |
 | SOC 2 P2.1, GDPR Art. 7                                    | [Double opt-in](/docs/waitlist#double-opt-in) verifies the email address before an entry counts, and the leave link lets a person leave the waitlist and deletes the entry. These features can support a consent process, but they do not establish or record valid consent by themselves (see below) |
 | GDPR Art. 5(1)(e), ISO A.5.34 (Privacy and protection of PII) | Unconfirmed entries are deleted once their link has expired, and with the opt-in [`retention`](/docs/waitlist#privacy), rejected and registered entries after the period you choose. This can support storage limitation; backups and other copies remain your responsibility |
+| GDPR Art. 17                                               | A deleted user's entry, which holds their email address, is deleted with them. This can support erasure; audit events and other copies are yours to handle |
 
 Left to you:
 
@@ -296,15 +295,17 @@ Left to you:
   your purpose, see [Privacy](/docs/waitlist#privacy). The cleanup is
   started by waitlist requests; schedule `deleteExpiredWaitlistEntries`
   if you need predictable periodic cleanup.
-- **Deleted users.** Their entry is kept as `registered`; delete it with
-  `deleteEntry`.
+- **Deleted users.** Their entry, which holds the email address, is
+  deleted with them.
 
 ## Known gaps
 
 Things the plugins don't do yet, so you don't find out in an audit:
 
-- **Deleting a user doesn't delete everything.** Waitlist entries and
-  audit events stay; referral rows rely on foreign keys. The
+- **Deleting a user keeps their audit events.** That is on purpose (a
+  security log has to outlive the accounts it is about), but erasure
+  requests need a decision: delete or pseudonymize those events yourself,
+  see the audit log's [Privacy](/docs/audit-log#privacy) section. The
   [Personal data](/docs/database#personal-data) table lists every table.
 - **No self-service export for users.** Admins can
   [export](/docs/audit-log#export) audit events; users can only list

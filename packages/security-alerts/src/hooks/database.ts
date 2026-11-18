@@ -1,6 +1,7 @@
 import type { AuthContext, BetterAuthOptions } from "@better-auth/core";
 import type { User } from "@better-auth/core/db";
 import { createNewUserMemory, createUserChangeTracker } from "@repo/plugin-utils/user-changes";
+import { eraseOnUserDelete } from "@repo/plugin-utils/user-data";
 import type { Alerter } from "../alerts";
 import { PLUGIN_ID } from "../alerts";
 import { deleteDevices } from "../devices";
@@ -69,16 +70,9 @@ export function createDatabaseHooks(
         },
       },
       delete: {
-        after: async (user) => {
-          try {
-            await deleteDevices(authContext.adapter, user.id);
-          } catch (error) {
-            authContext.logger.error(
-              `[${PLUGIN_ID}] failed to forget a deleted user's devices`,
-              error,
-            );
-          }
-        },
+        after: eraseOnUserDelete(authContext, PLUGIN_ID, "the devices", (user) =>
+          deleteDevices(authContext.adapter, user.id),
+        ),
       },
     },
     account: {

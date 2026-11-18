@@ -6,7 +6,7 @@ import type { Referral, ReferralCode, ReferralSlot, ReferralStatus, ReferralStep
 /** The adapter methods used here; satisfied by the base adapter and a transaction adapter. */
 export type Adapter = Pick<
   AuthContext["adapter"],
-  "findMany" | "findOne" | "create" | "update" | "count" | "delete"
+  "findMany" | "findOne" | "create" | "update" | "count" | "delete" | "deleteMany"
 >;
 
 // ----- codes -----
@@ -149,6 +149,43 @@ export async function markRewarded(adapter: Adapter, id: string): Promise<void> 
 
 export async function deleteReferral(adapter: Adapter, id: string): Promise<void> {
   await adapter.delete({ model: "referral", where: [{ field: "id", value: id }] });
+}
+
+/** Referrals deleted per round in `eraseUserData`. */
+const ERASE_PAGE_SIZE = 200;
+
+/**
+ * Deletes everything about a user: their code, the referrals they made
+ * and the one that brought them, with those referrals' steps and places.
+ * What `onDelete: "cascade"` does where the database enforces it.
+ */
+export async function eraseUserData(adapter: Adapter, userId: string): Promise<void> {
+  for (const field of ["referrerUserId", "referredUserId"] as const) {
+    // A page at a time: adapters return at most 100 rows without a limit,
+    // and some databases cap the number of values in an `in` list.
+    for (;;) {
+      const page = await adapter.findMany<Referral>({
+        model: "referral",
+        where: [{ field, value: userId }],
+        limit: ERASE_PAGE_SIZE,
+      });
+      if (page.length === 0) break;
+      const ids = page.map((referral) => referral.id);
+      const inIds = [{ field: "referralId", value: ids, operator: "in" as const }];
+      await adapter.deleteMany({ model: "referralStep", where: inIds });
+      await adapter.deleteMany({ model: "referralSlot", where: inIds });
+      await adapter.deleteMany({
+        model: "referral",
+        where: [{ field: "id", value: ids, operator: "in" }],
+      });
+      if (page.length < ERASE_PAGE_SIZE) break;
+    }
+  }
+  await adapter.deleteMany({
+    model: "referralSlot",
+    where: [{ field: "referrerUserId", value: userId }],
+  });
+  await adapter.deleteMany({ model: "referralCode", where: [{ field: "userId", value: userId }] });
 }
 
 // ----- places (`maxReferralsPerUser`) -----
