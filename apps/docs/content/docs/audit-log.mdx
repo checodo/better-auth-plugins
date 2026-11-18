@@ -380,6 +380,69 @@ response other than 2xx counts as failed, and so does a redirect: it is
 not followed, so the events and your headers never go to a URL you
 didn't configure.
 
+**Receiving signed requests.** Create the secret once, for example with
+`openssl rand -base64 32`, and give the same value to `httpDestination`
+and to the receiver. The receiver checks three things before it trusts a
+request: the timestamp is recent (so an old request can't be replayed),
+the signature matches the exact body it received, and it hasn't seen the
+`webhook-id` before. A Standard Webhooks library does the first two; with
+Web Crypto alone it looks like this:
+
+```ts title="app/api/audit-webhook/route.ts"
+import type { AuditEvent } from "@checodo/better-auth-audit-log";
+
+/** How old a request may be, in seconds. */
+const TOLERANCE = 5 * 60;
+
+const fromBase64 = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+
+/** The events of a request signed by `httpDestination`, or `null` if it isn't genuine. */
+async function verifiedEvents(request: Request, secret: string): Promise<AuditEvent[] | null> {
+  const id = request.headers.get("webhook-id");
+  const timestamp = request.headers.get("webhook-timestamp");
+  const signatures = request.headers.get("webhook-signature");
+  if (!id || !timestamp || !signatures) return null;
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > TOLERANCE) return null;
+
+  // The exact body: parsing and serializing again would change the bytes.
+  const body = await request.text();
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      fromBase64(secret.startsWith("whsec_") ? secret.slice(6) : secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const signed = new TextEncoder().encode(`${id}.${timestamp}.${body}`);
+    // "v1,<signature>", several separated by spaces while a secret is rotated.
+    for (const entry of signatures.split(" ")) {
+      const [version, signature] = entry.split(",");
+      if (version !== "v1" || !signature) continue;
+      // `verify` compares in constant time.
+      if (await crypto.subtle.verify("HMAC", key, fromBase64(signature), signed)) {
+        return JSON.parse(body) as AuditEvent[]; // format: "json"; "ndjson" is one event per line
+      }
+    }
+  } catch {
+    return null; // a malformed signature or body
+  }
+  return null;
+}
+
+export async function POST(request: Request) {
+  const events = await verifiedEvents(request, process.env.AUDIT_WEBHOOK_SECRET ?? "");
+  if (!events) return new Response("Invalid signature", { status: 401 });
+  // Skip a `webhook-id` you have already processed, then store the events.
+  await storeEvents(events);
+  return new Response(null, { status: 204 });
+}
+```
+
+The events arrive as JSON, so `createdAt` is a string. Answer with a
+2xx status only once they are stored: any other answer counts as failed
+and is logged on the sending side (there are no retries).
+
 **Transform.** `transform` converts each event for one destination (ECS,
 OpenTelemetry, a flat row...), or returns `null` to skip it there.
 `beforeLog` stays the step before storage, for every destination.
