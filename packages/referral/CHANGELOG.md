@@ -1,5 +1,11 @@
 # @checodo/better-auth-referral
 
+## 0.4.2
+
+### Patch Changes
+
+- 6fb82ef: Referral lists now show every completed step: with more than 100 steps on one page of referrals, the rest were left out.
+
 ## 0.4.1
 
 ### Patch Changes
