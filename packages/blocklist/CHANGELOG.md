@@ -1,5 +1,11 @@
 # @checodo/better-auth-blocklist
 
+## 0.4.0
+
+### Minor Changes
+
+- 2e6b989: Privacy relays (Firefox Relay, DuckDuckGo, SimpleLogin, addy.io, Proton Pass) are no longer treated as disposable: `disposableEmailDomains` never contains them (it contained `relay.firefox.com`). The new `privacyRelayDomains` list (`/lists` and `/lists/privacy-relay-domains`) lets apps that want one account per person block them too. The lists are refreshed from their sources.
+
 ## 0.3.2
 
 ### Patch Changes
