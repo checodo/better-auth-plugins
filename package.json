@@ -28,7 +28,7 @@
     "check": "node scripts/check-versions.mts && node scripts/check-docs.mts && biome check . --error-on-warnings && turbo run typecheck test build lint:package",
     "check:docs": "node scripts/check-docs.mts",
     "check:versions": "node scripts/check-versions.mts",
-    "test:db": "pnpm --filter @checodo/better-auth-waitlist --filter @checodo/better-auth-referral run test:db",
+    "test:db": "pnpm --filter @checodo/better-auth-waitlist --filter @checodo/better-auth-referral run test:db && pnpm --filter @checodo/better-auth-audit-log exec vitest run test/audit-log.test.ts test/chain.test.ts test/export.test.ts && pnpm --filter @checodo/better-auth-security-alerts exec vitest run test/security-alerts.test.ts test/official-plugins.test.ts",
     "smoke": "turbo run build --filter=./packages/* && node scripts/smoke-consumer.mts",
     "format": "biome format --write .",
     "changeset": "changeset",

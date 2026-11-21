@@ -1,3 +1,4 @@
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import { admin, testUtils } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it } from "vitest";
@@ -10,9 +11,10 @@ const BASE = "http://localhost:3000/api/auth";
 async function setup(options: AuditLogOptions = {}) {
   const { auth } = await getTestInstance(
     { plugins: [admin(), testUtils(), auditLog(options)] },
-    { disableTestUser: true },
+    { ...testDatabase(), disableTestUser: true },
   );
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const { test } = context;
   const userHeaders = async (email: string, role?: string) => {
     const user = await test.saveUser(test.createUser({ email, ...(role ? { role } : {}) }));
