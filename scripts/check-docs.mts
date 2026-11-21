@@ -54,6 +54,12 @@ const PLUGINS: PluginDocs[] = [
     options: "AuthenticationOptions",
   },
   { dir: "blocklist", pages: ["blocklist.mdx"], options: "BlocklistOptions" },
+  {
+    dir: "normalize",
+    pages: ["normalize.mdx"],
+    options: "EmailNormalizationOptions",
+    extraOptions: ["PhoneNormalizationOptions"],
+  },
   { dir: "referral", pages: ["referral.mdx"], options: "ReferralOptions" },
   {
     dir: "security-alerts",

@@ -43,6 +43,10 @@
       "types": "./dist/lists/disposable-email-domains.d.ts",
       "default": "./dist/lists/disposable-email-domains.js"
     },
+    "./lists/privacy-relay-domains": {
+      "types": "./dist/lists/privacy-relay-domains.d.ts",
+      "default": "./dist/lists/privacy-relay-domains.js"
+    },
     "./lists/reserved-usernames": {
       "types": "./dist/lists/reserved-usernames.d.ts",
       "default": "./dist/lists/reserved-usernames.js"

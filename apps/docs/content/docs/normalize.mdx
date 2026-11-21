@@ -1,0 +1,287 @@
+---
+title: Normalize
+description: One account per inbox, and phone numbers in E.164.
+---
+
+The normalize plugin makes sure that different ways of writing the same
+thing count as the same thing. better-auth itself only lowercases email
+addresses, so `ada+news@gmail.com` and `a.da@gmail.com` can be two
+accounts for one Gmail inbox, and `0151 1234 5678` and
+`+49 151 12345678` two phone numbers.
+
+- **Email:** stores the address an email actually reaches in
+  `user.normalizedEmail` (unique) and refuses a second account for it,
+  answering exactly like better-auth answers an existing email.
+  Optionally, people can sign in with any form of their address.
+- **Phone:** stores every number of better-auth's `phoneNumber` plugin in
+  E.164 (`+4915112345678`) and refuses invalid ones.
+
+Each part has its own entry point, so an app only loads what it uses:
+`/email` and `/phone`.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-normalize
+```
+
+</Step>
+<Step>
+
+### Add the plugins you need to your auth config
+
+```ts title="auth.ts"
+import { emailNormalization } from "@checodo/better-auth-normalize/email";
+import { phoneNormalization } from "@checodo/better-auth-normalize/phone";
+import { betterAuth } from "better-auth";
+import { phoneNumber } from "better-auth/plugins";
+
+export const auth = betterAuth({
+  emailAndPassword: { enabled: true },
+  plugins: [
+    emailNormalization(),
+    phoneNumber({ sendOTP: async ({ phoneNumber, code }) => sendSms(phoneNumber, code) }),
+    phoneNormalization({ defaultCountry: "DE" }),
+  ],
+});
+```
+
+</Step>
+<Step>
+
+### Migrate the database
+
+`emailNormalization` adds the `normalizedEmail` field to the `user`
+table (see [Schema](#schema)). The phone part adds nothing.
+
+<Tabs items={["migrate", "generate"]}>
+<Tab value="migrate">
+
+```package-install
+npx auth@latest migrate
+```
+
+</Tab>
+<Tab value="generate">
+
+```package-install
+npx auth@latest generate
+```
+
+</Tab>
+</Tabs>
+
+Then fill the field for the users you already have, see
+[Existing users](#existing-users).
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+It adds the plugin's error codes, so `error.code` can be compared with
+`NORMALIZE_ERROR_CODES`. Neither part adds client endpoints.
+
+```ts title="auth-client.ts"
+import { normalizeClient } from "@checodo/better-auth-normalize/client";
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  plugins: [normalizeClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Email
+
+Every new or changed email gets a normalized form: trimmed, lowercased,
+a trailing dot of the domain removed, and the parts that the provider
+ignores removed.
+
+| Provider                                                        | Ignores                              | Example                                   |
+| --------------------------------------------------------------- | ------------------------------------ | ----------------------------------------- |
+| Gmail (`gmail.com`, `googlemail.com`)                           | dots, everything from `+`            | `a.da+news@googlemail.com` → `ada@gmail.com` |
+| Outlook (`outlook.com`, `hotmail.com`, `live.com`, `msn.com`)   | everything from `+`                  | `ada+news@outlook.com` → `ada@outlook.com` |
+| iCloud (`icloud.com`, `me.com`, `mac.com`)                      | everything from `+`                  | `ada+news@icloud.com` → `ada@icloud.com`  |
+| Proton (`proton.me`, `protonmail.com`, `pm.me`)                 | everything from `+`                  | `ada+news@proton.me` → `ada@proton.me`    |
+| Fastmail (`fastmail.com`, `fastmail.fm`)                        | everything from `+`                  | `ada+news@fastmail.com` → `ada@fastmail.com` |
+| Every other domain                                              | nothing (with `subaddressing: "all"`: everything from `+`) | `ada+news@example.com` stays |
+
+At other domains, `+` can be part of a real address, and merging two
+people's accounts is worse than missing an alias, so tags are only
+removed where the provider documents them. Yahoo's `-keyword` addresses
+are left out for the same reason. To change the rules, pass `normalize`:
+
+```ts title="auth.ts"
+import { emailNormalization, normalizeEmailAddress } from "@checodo/better-auth-normalize/email";
+
+emailNormalization({
+  // The built-in rules, plus your company's domain.
+  normalize: (email) => {
+    const normalized = normalizeEmailAddress(email);
+    return normalized?.replace(/\+[^@]*@example\.com$/, "@example.com") ?? null;
+  },
+});
+```
+
+**A second account for the same inbox** is refused on every way of
+creating a user or changing an email: email and password, social
+sign-in, magic link, email OTP, the admin plugin, server code. The
+answer is the one better-auth gives for an existing email:
+`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` (422), or, where better-auth
+hides existing users (`requireEmailVerification`, or `autoSignIn:
+false`), better-auth's own response shaped like a successful sign-up,
+after the same checks of the input, and with your
+`onExistingUserSignUp` called for the account that has the inbox. So
+the plugin tells no more about who has an account than better-auth
+does. With the
+[audit log](/docs/audit-log), each refusal is recorded as
+`normalize.email-alias-refused`.
+
+**Signing in with another form.** With `allowNormalizedSignIn: true`,
+someone who signed up as `ada@gmail.com` can sign in as
+`a.da+work@gmail.com`: email and password, magic link, email OTP
+(sign-in, email verification, password reset), and password reset by
+link use the stored address instead. The answer is the same
+for any address, so it reveals nothing about other users.
+
+### Existing users
+
+Users created before the plugin have no `normalizedEmail`, so aliases of
+them can still sign up. Fill it with the server-only
+`backfillNormalizedEmails`, a batch at a time, from a script or a job:
+
+```ts title="backfill.ts"
+let afterId: string | undefined;
+do {
+  const batch = await auth.api.backfillNormalizedEmails({ body: { afterId, limit: 500 } });
+  for (const userId of batch.conflicts) console.warn(`Another account has the inbox of ${userId}`);
+  afterId = batch.nextAfterId ?? undefined;
+} while (afterId);
+```
+
+Two users who already share an inbox are reported in `conflicts`; the
+second keeps `normalizedEmail: null` until you decide which account
+stays. Running it again changes nothing, and after changing the rules
+(`subaddressing`, `normalize`) it recomputes every address.
+
+### Phone numbers
+
+`phoneNormalization` stores every number of better-auth's
+[`phoneNumber` plugin](https://better-auth.com/docs/plugins/phone-number)
+in E.164 (`+4915112345678`), whatever the user typed, and refuses
+numbers that aren't valid with `INVALID_PHONE_NUMBER` (400). It
+normalizes the number in every request (send OTP, verify, sign in,
+password reset) and in every stored user, so one number can't make two
+accounts, and an OTP sent to `0151 1234 5678` can be verified as
+`+49 151 12345678`.
+
+Numbers written without `+` and a country code need `defaultCountry`.
+Parsing uses [libphonenumber-js](https://www.npmjs.com/package/libphonenumber-js)
+with its compact metadata, which checks a number's length and prefix
+for its country. For stricter rules, or to pick the country from the
+request (an IP lookup), pass `normalize`:
+
+```ts title="auth.ts"
+import { phoneNormalization } from "@checodo/better-auth-normalize/phone";
+import parsePhoneNumber from "libphonenumber-js/max";
+
+phoneNormalization({
+  normalize: (input) => {
+    const parsed = parsePhoneNumber(input, "DE");
+    return parsed?.isValid() ? parsed.number : null;
+  },
+});
+```
+
+### Privacy relays and disposable addresses
+
+Relays such as Firefox Relay, DuckDuckGo, SimpleLogin, and addy.io give
+one person a separate address per site, all forwarding to one inbox.
+They can't be normalized: each address is a real, different one. To block or flag them, use the
+[blocklist](/docs/blocklist) with its `privacyRelayDomains` list.
+Disposable domains are blocked there as well, with
+`disposableEmailDomains`.
+
+## Schema
+
+`emailNormalization` adds a field to better-auth's `user` table:
+
+Table: `user`
+
+<TypeTable
+  type={{
+    normalizedEmail: {
+      type: "string",
+      description:
+        "The address the email reaches, e.g. `ada@gmail.com` for `a.da+news@gmail.com`. Unique. `null` until filled for existing users, or when two users share an inbox. Never sent to clients.",
+    },
+  }}
+/>
+
+Rename it like better-auth's own fields:
+
+```ts title="auth.ts"
+emailNormalization({ schema: { user: { fields: { normalizedEmail: "normalized_email" } } } });
+```
+
+## Error codes
+
+Exported as `NORMALIZE_ERROR_CODES` from both entry points, to compare
+with `error.code`. A second account for the same inbox uses better-auth's
+own `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`.
+
+| Code                   | Status | When                                                 |
+| ---------------------- | ------ | ---------------------------------------------------- |
+| `INVALID_PHONE_NUMBER` | 400    | A phone number that isn't valid, with `phoneNormalization` |
+
+## Options
+
+`emailNormalization`:
+
+<TypeTable
+  type={{
+    subaddressing: {
+      type: '"known" | "all"',
+      default: '"known"',
+      description: "Where a `+tag` is removed: at providers that document it, or at every domain.",
+    },
+    normalize: {
+      type: "(email: string) => string | null",
+      description: "Replaces the built-in rules. `null` stores no normalized address.",
+    },
+    allowNormalizedSignIn: {
+      type: "boolean",
+      default: "false",
+      description: "Sign in with any form of the stored address.",
+    },
+    schema: {
+      type: "{ user?: { fields?: { normalizedEmail?: string } } }",
+      description: "Rename the field. See [Schema](#schema).",
+    },
+  }}
+/>
+
+`phoneNormalization`:
+
+<TypeTable
+  type={{
+    defaultCountry: {
+      type: "string",
+      description: 'Country of numbers written without `+` and a country code, e.g. `"DE"`.',
+    },
+    normalize: {
+      type: "(phoneNumber: string) => string | null",
+      description: "Replaces the built-in parsing: return E.164, or `null` if invalid.",
+    },
+  }}
+/>

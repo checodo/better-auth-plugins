@@ -5,6 +5,7 @@
     "audit-log",
     "authentication",
     "blocklist",
+    "normalize",
     "referral",
     "security-alerts",
     "waitlist",

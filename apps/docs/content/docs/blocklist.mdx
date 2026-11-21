@@ -372,14 +372,45 @@ blocklist({
 | Export                   | Entries | Content                                                          |
 | ------------------------ | ------- | ---------------------------------------------------------------- |
 | `disposableEmailDomains` | ~32,000 | Domains of disposable (temporary) email providers                |
+| `privacyRelayDomains`    | 13      | Domains of privacy relays (Firefox Relay, DuckDuckGo, SimpleLogin, ...) |
 | `reservedUsernames`      | ~500    | System, route, and role names such as `admin`, `api`, `support` |
 
 Each list is also its own entry point, to load only what you need:
 
 ```ts
 import { disposableEmailDomains } from "@checodo/better-auth-blocklist/lists/disposable-email-domains";
+import { privacyRelayDomains } from "@checodo/better-auth-blocklist/lists/privacy-relay-domains";
 import { reservedUsernames } from "@checodo/better-auth-blocklist/lists/reserved-usernames";
 ```
+
+### Privacy relays
+
+Relays such as Firefox Relay, DuckDuckGo Email Protection, SimpleLogin,
+addy.io, and Proton Pass give people a separate
+address per site and forward it to their real inbox. They aren't
+disposable, so `disposableEmailDomains` never contains them, and
+privacy-minded people can sign up with them.
+
+One person can have any number of relay addresses, though. If you need
+one account per person (free trials, referral rewards), block them too:
+
+```ts title="auth.ts"
+import { blocklist } from "@checodo/better-auth-blocklist";
+import { disposableEmailDomains, privacyRelayDomains } from "@checodo/better-auth-blocklist/lists";
+
+blocklist({
+  email: { domains: [...disposableEmailDomains, ...privacyRelayDomains] },
+});
+```
+
+`privacyRelayDomains` is written by hand from each service's
+documentation. Fastmail Masked Email and iCloud Hide My Email use the
+provider's own domains (`fastmail.com`, `icloud.com`), so they can't be
+listed. Sign in with Apple's `privaterelay.appleid.com` isn't listed
+either: it gives one address per Apple ID and app, so it doesn't let
+anyone sign up twice, and blocking it would lock out everyone who hides
+their email when signing in with Apple. To count different forms of one address as one
+account, see [Normalize](/docs/normalize).
 
 ### How the domain list is built
 
@@ -397,7 +428,8 @@ Then:
 1. Invalid entries are dropped, and the rest is de-duplicated and sorted.
 2. Known legitimate mail services are removed: the allowlist and mail
    service list of [disposable/disposable](https://github.com/disposable/disposable),
-   and major providers such as Gmail, Outlook, GMX, and Proton.
+   major providers such as Gmail, Outlook, GMX, and Proton, and every
+   privacy relay in `privacyRelayDomains`.
 3. Public suffixes such as `net.ua` or `msk.ru` are removed, checked
    against the [Public Suffix List](https://publicsuffix.org). Domain rules
    also match subdomains, so a suffix would block every domain registered

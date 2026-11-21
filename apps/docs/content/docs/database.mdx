@@ -74,6 +74,7 @@ stores about people, and what happens to it when a user is deleted.
 | `referralSlot`  | The referrer's user id (only with `maxReferralsPerUser`)                          | Deleted with the user or its referral (also without foreign keys) |
 | `knownDevice`   | User id; a keyed hash of browser, OS (and network), a label like "Chrome on macOS" | Deleted with the user (also without foreign keys)         |
 | `waitlistEntry` | Email, your `metadata`, the approving admin's id                                  | Deleted with the user (found by email)                     |
+| `user.normalizedEmail` (normalize) | The normalized email address, e.g. `ada@gmail.com` for `a.da+news@gmail.com` | Deleted with the user (it is a field of the user) |
 | `user` (authentication) | Placeholder emails (`<account id>@steam.invalid`), names and avatars from the provider | better-auth's own deletion                         |
 
 Tokens and invite codes are stored only as hashes. "Deleted with the

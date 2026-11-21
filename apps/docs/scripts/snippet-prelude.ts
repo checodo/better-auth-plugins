@@ -14,6 +14,8 @@ import { authentication } from "@checodo/better-auth-authentication";
 import { authenticationClient } from "@checodo/better-auth-authentication/client";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { blocklistClient } from "@checodo/better-auth-blocklist/client";
+import { normalizeClient } from "@checodo/better-auth-normalize/client";
+import { emailNormalization } from "@checodo/better-auth-normalize/email";
 import { referral } from "@checodo/better-auth-referral";
 import { referralClient } from "@checodo/better-auth-referral/client";
 import { securityAlerts } from "@checodo/better-auth-security-alerts";
@@ -41,7 +43,14 @@ export {
 export { authenticationClient } from "@checodo/better-auth-authentication/client";
 export { BLOCKLIST_ERROR_CODES, blocklist } from "@checodo/better-auth-blocklist";
 export { blocklistClient } from "@checodo/better-auth-blocklist/client";
-export { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
+export {
+  disposableEmailDomains,
+  privacyRelayDomains,
+  reservedUsernames,
+} from "@checodo/better-auth-blocklist/lists";
+export { NORMALIZE_ERROR_CODES } from "@checodo/better-auth-normalize";
+export { normalizeClient } from "@checodo/better-auth-normalize/client";
+export { emailNormalization } from "@checodo/better-auth-normalize/email";
 export {
   EMAIL_VERIFIED_STEP,
   REFERRAL_ERROR_CODES,
@@ -73,6 +82,7 @@ export const auth = betterAuth({
     emailOTP({ sendVerificationOTP: async () => {} }),
     auditLog(),
     securityAlerts({ sendAlert: async () => {} }),
+    emailNormalization(),
   ],
 });
 
@@ -85,6 +95,7 @@ export const authClient = createAuthClient({
     authenticationClient(),
     auditLogClient(),
     securityAlertsClient(),
+    normalizeClient(),
     magicLinkClient(),
     emailOTPClient(),
   ],
@@ -111,6 +122,7 @@ export declare const order: { id: string; userId: string };
 export declare function alertSecurityTeam(event: unknown): Promise<void>;
 export declare function saveFailures(rows: { at: Date; type: string }[]): Promise<void>;
 export declare function storeEvents(events: unknown[]): Promise<void>;
+export declare function sendSms(phoneNumber: string, text: string): Promise<void>;
 export declare function grantCredit(
   userId: string,
   options?: { idempotencyKey?: string },

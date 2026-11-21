@@ -61,7 +61,7 @@ before a user is created.
 ## How they work together
 
 | Together                         | What happens                                                                                                                         |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --- |
 | Blocklist + waitlist             | `/waitlist/join` and `/waitlist/create-invite` check the email, so a blocked address can't join or be invited only to fail at sign-up. |
 | Blocklist + referral             | A sign-up the blocklist refuses creates no referral and completes no step.                                                           |
 | Waitlist + referral              | Both codes come with the request that creates the user: `x-invite-code` and `x-referral-code` headers, or `additionalData` for social sign-in. |
@@ -76,18 +76,18 @@ Every plugin is tested with the official plugins below. Users are checked
 when they are created, so a plugin that creates users its own way is
 covered as well.
 
-| Official plugin       | Blocklist                         | Waitlist                          | Referral                   | Audit log                                       | Security alerts                       |
-| --------------------- | --------------------------------- | --------------------------------- | -------------------------- | ----------------------------------------------- | ------------------------------------- |
-| Social sign-in        | Checks the email                  | Gated; code in `additionalData`   | Code in `additionalData`   | Sign-up, sign-in, linked accounts               | New device; linked accounts           |
-| Magic link            | Checks the email                  | Gated                             | `x-referral-code` header   | Sign-in                                         | New device                            |
-| Email OTP             | Checks sign-up and email changes  | Gated                             | `x-referral-code` header   | Sign-in, failed sign-in, password reset         | New device, password reset            |
-| Phone number          | Checks the generated email        | Gated; `allow` its domain         | `x-referral-code` header   | Failed sign-in, password reset                  | Password reset by SMS                 |
-| Sign-In with Ethereum | Checks the email given            | Gated; `allow` its domain         | `x-referral-code` header   | Sign-up, sign-in                                | New device                            |
-| Anonymous             | Guests pass                       | Gated; `bypass` it                | -                          | Sign-up, sign-in                                | -                                     |
-| Username              | Checks usernames                  | -                                 | -                          | Failed sign-in by username                      | New device                            |
-| Admin                 | Checks `createUser`               | `createUser` skips it             | -                          | Every admin action                              | Changes an admin makes                |
-| Organization          | Names, slugs, teams, invitations  | -                                 | -                          | Organizations, invitations, members, roles      | -                                     |
-| Two-factor            | -                                 | -                                 | -                          | Second factor, turning it on and off            | Turning it off; one alert per sign-in |
+| Official plugin       | Blocklist                         | Waitlist                          | Referral                   | Audit log                                       | Security alerts                       | Normalize |
+| --------------------- | --------------------------------- | --------------------------------- | -------------------------- | ----------------------------------------------- | ------------------------------------- | --- |
+| Social sign-in        | Checks the email                  | Gated; code in `additionalData`   | Code in `additionalData`   | Sign-up, sign-in, linked accounts               | New device; linked accounts           | Normalizes the email; refuses an alias |
+| Magic link            | Checks the email                  | Gated                             | `x-referral-code` header   | Sign-in                                         | New device                            | Refuses an alias; alias sign-in |
+| Email OTP             | Checks sign-up and email changes  | Gated                             | `x-referral-code` header   | Sign-in, failed sign-in, password reset         | New device, password reset            | Refuses an alias; alias sign-in |
+| Phone number          | Checks the generated email        | Gated; `allow` its domain         | `x-referral-code` header   | Failed sign-in, password reset                  | Password reset by SMS                 | E.164 with `phoneNormalization` |
+| Sign-In with Ethereum | Checks the email given            | Gated; `allow` its domain         | `x-referral-code` header   | Sign-up, sign-in                                | New device                            | Refuses an alias given |
+| Anonymous             | Guests pass                       | Gated; `bypass` it                | -                          | Sign-up, sign-in                                | -                                     | Guests pass |
+| Username              | Checks usernames                  | -                                 | -                          | Failed sign-in by username                      | New device                            | - |
+| Admin                 | Checks `createUser`               | `createUser` skips it             | -                          | Every admin action                              | Changes an admin makes                | Refuses an alias in `createUser` |
+| Organization          | Names, slugs, teams, invitations  | -                                 | -                          | Organizations, invitations, members, roles      | -                                     | - |
+| Two-factor            | -                                 | -                                 | -                          | Second factor, turning it on and off            | Turning it off; one alert per sign-in | - |
 
 Security alerts also work with the separate
 [passkey](https://better-auth.com/docs/plugins/passkey) (passkeys added

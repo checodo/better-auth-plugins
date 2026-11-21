@@ -1,10 +1,13 @@
+import { privacyRelayDomains } from "../src/lists/privacy-relay-domains.ts";
+
 /**
  * Well-known mail providers that must never be blocked, as a last safety
  * net against mistakes in the upstream lists. Includes privacy-focused
- * providers, which are not disposable. Used by `update-lists.ts` and
- * checked by the tests.
+ * providers and privacy relays, which are not disposable. Used by
+ * `update-lists.ts` and checked by the tests.
  */
 export const NEVER_BLOCK: readonly string[] = [
+  ...privacyRelayDomains,
   "126.com",
   "163.com",
   "aol.com",
@@ -47,6 +50,8 @@ export const NEVER_BLOCK: readonly string[] = [
   "outlook.com",
   "pm.me",
   "posteo.de",
+  // Sign in with Apple's "Hide My Email": one address per Apple ID and app.
+  "privaterelay.appleid.com",
   "proton.me",
   "protonmail.com",
   "qq.com",
