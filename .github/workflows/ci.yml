@@ -62,9 +62,10 @@ jobs:
       - name: Pack, install, and run the packages in a fresh app
         run: pnpm smoke
 
-  # The concurrency tests of the waitlist and referral plugins on Postgres,
-  # MySQL and MongoDB (`pnpm test:db`), where requests really run in
-  # parallel. On Postgres and MySQL hooks run in transactions; MongoDB has
+  # The concurrency tests of the waitlist and referral plugins, and the
+  # database tests of the audit log (events, hash chain, export) and
+  # security alerts (devices), on Postgres, MySQL and MongoDB
+  # (`pnpm test:db`), where requests really run in parallel. On Postgres and MySQL hooks run in transactions; MongoDB has
   # no foreign keys and (on a single server) no transactions, and makes its
   # own unique indexes. SQLite, used by `pnpm test`, runs one statement at
   # a time. Runs in parallel with `ci`. The services use the addresses and
@@ -120,7 +121,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Concurrency tests on ${{ matrix.database }}
+      - name: Database tests on ${{ matrix.database }}
         run: pnpm test:db
         env:
           TEST_DATABASE: ${{ matrix.database }}

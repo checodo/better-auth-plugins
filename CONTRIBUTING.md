@@ -298,7 +298,11 @@ How it works:
   database (a conditional update, a unique key, a transaction committing
   late) also runs on Postgres, MySQL and MongoDB: `pnpm test:db` runs the tests of
   the waitlist and referral plugins whose name contains "concurrent",
-  "race", "out of order", or "at once", with `TEST_DATABASE` set.
+  "race", "out of order", or "at once", and the audit log's event, hash
+  chain, and export tests and the security alerts' tests (whole files,
+  listed in the root `package.json`, so a change to the list needs no
+  changeset), with `TEST_DATABASE` set. It builds the audit log first:
+  the security alerts' tests import it like an app would, from `dist`.
   `getTestInstance` connects to fixed addresses; start them with
   `docker compose -f docker-compose.test.yml up -d --wait`, then run
   `TEST_DATABASE=postgres pnpm test:db`, `TEST_DATABASE=mysql pnpm test:db`,

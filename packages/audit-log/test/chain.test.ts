@@ -1,3 +1,4 @@
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import { getTestInstance } from "better-auth/test";
 import { describe, expect, it, vi } from "vitest";
 import { GENESIS_HASH, linkHash } from "../src/chain";
@@ -11,9 +12,10 @@ const PASSWORD = "password1234";
 async function setup(options: AuditLogOptions = {}) {
   const { auth, client } = await getTestInstance(
     { plugins: [auditLog({ hashChain: true, ...options })] },
-    { disableTestUser: true },
+    { ...testDatabase(), disableTestUser: true },
   );
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const record = (type: string) => auth.api.recordAuditEvent({ body: { type } });
   const links = () =>
     context.adapter.findMany<AuditChainLink>({
@@ -247,7 +249,11 @@ describe("hash chain options and access", () => {
   });
 
   it("reports when it is off", async () => {
-    const { auth } = await getTestInstance({ plugins: [auditLog()] }, { disableTestUser: true });
+    const { auth } = await getTestInstance(
+      { plugins: [auditLog()] },
+      { ...testDatabase(), disableTestUser: true },
+    );
+    await resetTestDatabase(await auth.$context);
     await expect(auth.api.verifyAuditChain({})).rejects.toMatchObject({
       body: { code: "HASH_CHAIN_NOT_ENABLED" },
     });

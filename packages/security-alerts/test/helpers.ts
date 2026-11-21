@@ -1,3 +1,4 @@
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { getTestInstance } from "better-auth/test";
 import type { SecurityAlert, SecurityAlertsOptions } from "../src/index";
@@ -70,10 +71,11 @@ export async function setup<const P extends BetterAuthPlugin[] = []>(
         }),
       ],
     },
-    { disableTestUser: true },
+    { ...testDatabase(), disableTestUser: true },
   );
   const { auth } = instance;
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const api = auth.api as unknown as CoreApi;
 
   /** Signs up (and in, from Chrome on macOS); returns the user and its session cookie. */

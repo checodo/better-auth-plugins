@@ -1,5 +1,6 @@
 # Databases for `pnpm test:db`: the concurrency tests of the waitlist and
-# referral plugins on Postgres, MySQL and MongoDB, which (unlike SQLite) run
+# referral plugins, and the database tests of the audit log and security
+# alerts, on Postgres, MySQL and MongoDB, which (unlike SQLite) run
 # requests in parallel. better-auth's `getTestInstance` connects to these
 # exact addresses and credentials. Test data only; never expose the ports.
 #

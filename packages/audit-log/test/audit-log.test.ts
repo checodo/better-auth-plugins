@@ -1,3 +1,4 @@
+import { resetTestDatabase, testDatabase } from "@repo/tooling/test-helpers";
 import type { BetterAuthOptions } from "better-auth";
 import { admin, magicLink, testUtils, twoFactor, username } from "better-auth/plugins";
 import { getTestInstance } from "better-auth/test";
@@ -47,9 +48,10 @@ async function setup(options: AuditLogOptions = {}, config: Partial<BetterAuthOp
         auditLog(options),
       ],
     },
-    { disableTestUser: true, clientOptions: { plugins: [auditLogClient()] } },
+    { ...testDatabase(), disableTestUser: true, clientOptions: { plugins: [auditLogClient()] } },
   );
   const context = await auth.$context;
+  await resetTestDatabase(context);
   const { test } = context;
 
   /** A user signed up with a password, plus their session headers. */
