@@ -71,6 +71,7 @@ qualified adviser.
 | [Audit log](#audit-log)           | CC6.2, CC6.3, CC7.2, CC7.3, P4.2, P4.3 | A.5.28, A.8.2, A.8.10, A.8.11, A.8.15, A.8.16 | Art. 5(1)(c), 5(1)(e), 15, 32, 33 | -                 |
 | [Authentication](#authentication) | CC6.1                                  | A.5.16, A.8.5                                 | Art. 5(1)(c)                      | -                 |
 | [Blocklist](#blocklist)           | CC6.1, CC6.2, CC6.6                    | A.5.16, A.5.17, A.8.5                         | Art. 32                           | §3.1.1.2          |
+| [Normalize](#normalize)           | CC6.2                                  | A.5.16                                        | Art. 5(1)(c), 5(1)(d)             | -                 |
 | [Referral](#referral)             | -                                      | -                                             | Art. 5(1)(c), 17                  | -                 |
 | [Security alerts](#security-alerts) | CC7.2, CC7.3, CC7.4                  | A.5.17, A.5.26, A.8.16                        | Art. 32                           | §4.1.2.1, §4.2, §4.3, §4.6 |
 | [Waitlist](#waitlist)             | CC6.2, P2.1                            | A.5.16, A.5.34                                | Art. 5(1)(e), 7, 17               | -                 |
@@ -207,6 +208,26 @@ Left to you:
   counts per IP address.
 - **IP rules are not a network control.** They keep out casual abuse,
   not someone with a VPN; your firewall or WAF is the network control.
+
+## Normalize
+
+The [normalize](/docs/normalize) plugin stores the normalized form of each
+email address and phone number, so one person can't hold several accounts
+under different spellings of one address.
+
+| Control                                                    | How the plugin can contribute                                                                 |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| SOC 2 CC6.2 (registers users before access), ISO A.5.16 (Identity management) | One account per inbox and per phone number, on every way of creating a user, which helps keep identities unique. Privacy relays are separate addresses and still count as separate people |
+| GDPR Art. 5(1)(d) (accuracy)                               | Phone numbers are stored in one format (E.164), and invalid ones are refused                  |
+| GDPR Art. 5(1)(c) (data minimisation)                      | Adds one derived field, `normalizedEmail`, which is personal data like the email itself and is never sent to clients. Deleted with the user by better-auth |
+
+Left to you:
+
+- **Fill existing users.** Until `backfillNormalizedEmails` has run,
+  aliases of existing users can still sign up, and inboxes that already
+  have two accounts need a decision about which one stays.
+- **List the field** in your records of processing, next to the email
+  address.
 
 ## Referral
 

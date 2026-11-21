@@ -11,11 +11,13 @@
  * } from "@checodo/better-auth-blocklist/lists";
  *
  * blocklist({
- *   email: { domains: disposableEmailDomains },
+ *   email: { domains: disposableEmailDomains }, // privacyRelayDomains too, to block relays
+
  *   username: { values: reservedUsernames },
  *   organization: { values: reservedUsernames },
  * });
  * ```
  */
 export { disposableEmailDomains } from "./disposable-email-domains";
+export { privacyRelayDomains } from "./privacy-relay-domains";
 export { reservedUsernames } from "./reserved-usernames";

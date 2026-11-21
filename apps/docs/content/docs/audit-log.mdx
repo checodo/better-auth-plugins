@@ -252,6 +252,7 @@ don't depend on it.
 | `blocklist.blocked`      | [Blocklist](/docs/blocklist)   | A sign-up, sign-in, or change is refused (`status: "failure"`). `metadata`: `target`, the `value`, and the `rule` (both values `"[redacted]"` for passwords) | medium |
 | `blocklist.rule-created` | Blocklist                      | An admin creates a rule                                | high     |
 | `blocklist.rule-deleted` | Blocklist                      | An admin deletes a rule                                | high     |
+| `normalize.email-alias-refused` | [Normalize](/docs/normalize) | A second account for an inbox is refused (`status: "failure"`, no actor, `userId`: the existing account). `metadata.email`: the address tried | medium |
 | `referral.created`       | [Referral](/docs/referral)     | A user signs up with a referral code (`userId`: the new user) | low |
 | `referral.completed`     | Referral                       | A referral completes (`userId`: the referrer it rewards) | medium |
 | `referral.reward-failed` | Referral                       | `onReferralCompleted` threw on its last attempt (`rewardRetry.maxAttempts`), so the reward isn't retried (`status: "failure"`, no actor, `userId`: the referrer). `metadata`: `referralId`, `referredUserId`, `attempts` | high |

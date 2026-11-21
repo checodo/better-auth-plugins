@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/authentication", label: "Sign-in providers" },
   { href: "/organizations", label: "Organizations" },
   { href: "/admin", label: "Blocklist rules" },
+  { href: "/normalize", label: "Normalize" },
   { href: "/waitlist", label: "Waitlist" },
   { href: "/referral", label: "Referral" },
   { href: "/security-alerts", label: "Security alerts" },

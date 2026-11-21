@@ -4,6 +4,7 @@ import { consoleDestination } from "@checodo/better-auth-audit-log/destinations"
 import { authentication } from "@checodo/better-auth-authentication";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
+import { emailNormalization } from "@checodo/better-auth-normalize/email";
 import { referral } from "@checodo/better-auth-referral";
 import { securityAlerts } from "@checodo/better-auth-security-alerts";
 import { waitlist } from "@checodo/better-auth-waitlist";
@@ -155,6 +156,9 @@ export const authOptions = {
         resetPasswordURL: `${baseURL}/reset-password`,
       },
     }),
+    // One account per inbox. "all": also at acme.test, so `ada+x@acme.test`
+    // is refused once `ada@acme.test` exists, and can sign in as her.
+    emailNormalization({ subaddressing: "all", allowNormalizedSignIn: true }),
     username(),
     admin(),
     organization({ teams: { enabled: true } }),

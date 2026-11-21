@@ -16,6 +16,10 @@ import { blocklistClient } from "@checodo/better-auth-blocklist/client";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
 import { disposableEmailDomains as disposableOnly } from "@checodo/better-auth-blocklist/lists/disposable-email-domains";
 import { reservedUsernames as reservedOnly } from "@checodo/better-auth-blocklist/lists/reserved-usernames";
+import { NORMALIZE_ERROR_CODES } from "@checodo/better-auth-normalize";
+import { normalizeClient } from "@checodo/better-auth-normalize/client";
+import { emailNormalization } from "@checodo/better-auth-normalize/email";
+import { normalizePhoneNumber } from "@checodo/better-auth-normalize/phone";
 import { REFERRAL_ERROR_CODES, referral } from "@checodo/better-auth-referral";
 import { referralClient } from "@checodo/better-auth-referral/client";
 import { WAITLIST_ERROR_CODES, waitlist } from "@checodo/better-auth-waitlist";
@@ -41,6 +45,7 @@ const options = {
     }),
     waitlist({ allow: ["example.com"], confirmEmail: false }),
     referral(),
+    emailNormalization({ subaddressing: "all" }),
     authentication({ steam: {} }),
     auditLog({
       destinations: [
@@ -64,6 +69,7 @@ const client = createAuthClient({
     blocklistClient(),
     waitlistClient(),
     referralClient(),
+    normalizeClient(),
     authenticationClient(),
     auditLogClient(),
   ],
@@ -145,6 +151,16 @@ const exported = (await auth.api.exportAuditEvents({ query: { format: "csv" } })
 assert.ok((await exported.text()).startsWith("id,createdAt,type"), "audit-log exports CSV");
 const notAdmin = await call("/audit-log/export", { cookie });
 assert.equal(notAdmin.status, 403, `audit-log/export: ${await notAdmin.clone().text()}`);
+
+// normalize: a second account for the same inbox is refused, and the phone
+// helper loads from its own entry point.
+const alias = await call("/sign-up/email", {
+  method: "POST",
+  body: JSON.stringify({ email: "ada+x@example.com", password: "a-long-password-1", name: "Eve" }),
+});
+assert.equal(alias.status, 422, `normalize: ${await alias.clone().text()}`);
+assert.equal(normalizePhoneNumber("+49 151 12345678"), "+4915112345678");
+assert.ok(NORMALIZE_ERROR_CODES.INVALID_PHONE_NUMBER, "normalize error codes");
 
 // authentication: Steam builds its sign-in URL without network access.
 const steam = await call("/sign-in/social", {
