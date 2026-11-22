@@ -7,8 +7,8 @@
 
 Plugins for [better-auth](https://better-auth.com) that install and work
 like the ones that ship with it: audit logs, blocklists, waitlists,
-referrals, security alerts, email and phone normalization, and gaming
-sign-ins.
+referrals, security alerts, email and phone normalization, data exports
+for GDPR requests, and gaming sign-ins.
 
 **[Documentation](https://checodo-better-auth-plugins.vercel.app)** ·
 [Combining plugins](https://checodo-better-auth-plugins.vercel.app/docs/combining-plugins) ·
@@ -21,6 +21,7 @@ sign-ins.
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**Audit log**](https://checodo-better-auth-plugins.vercel.app/docs/audit-log) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-audit-log)](https://www.npmjs.com/package/@checodo/better-auth-audit-log)                         | Records every sign-in method, failed sign-ins, account changes, and admin actions. Retention, a tamper-evident hash chain, export as NDJSON or CSV, and forwarding to a SIEM, a log service, or a webhook. |
 | [**Blocklist**](https://checodo-better-auth-plugins.vercel.app/docs/blocklist) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-blocklist)](https://www.npmjs.com/package/@checodo/better-auth-blocklist)                         | Blocks disposable email domains, reserved usernames and organization names, weak passwords, and IP addresses or countries. Lists included, also of privacy relays.                                         |
+| [**Data export**](https://checodo-better-auth-plugins.vercel.app/docs/data-export) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-data-export)](https://www.npmjs.com/package/@checodo/better-auth-data-export)                 | Lets every user download what you store about them as JSON (GDPR access and portability requests), with secrets left out.                                                                                  |
 | [**Waitlist**](https://checodo-better-auth-plugins.vercel.app/docs/waitlist) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-waitlist)](https://www.npmjs.com/package/@checodo/better-auth-waitlist)                             | Puts sign-up behind a waitlist: people join, admins approve, invites let them in. Email confirmation and cleanup included.                                                                                 |
 | [**Normalize**](https://checodo-better-auth-plugins.vercel.app/docs/normalize) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-normalize)](https://www.npmjs.com/package/@checodo/better-auth-normalize)                         | One account per inbox (`a.da+news@gmail.com` is `ada@gmail.com`), and phone numbers in E.164.                                                                                                              |
 | [**Referral**](https://checodo-better-auth-plugins.vercel.app/docs/referral) <br> [![npm](https://img.shields.io/npm/v/@checodo/better-auth-referral)](https://www.npmjs.com/package/@checodo/better-auth-referral)                             | Referral codes for every user, attribution at sign-up, and reward steps you trigger (first purchase, verified email...).                                                                                   |

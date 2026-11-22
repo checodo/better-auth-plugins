@@ -1,0 +1,282 @@
+---
+title: Data export
+description: Let every user download what you store about them, for GDPR access and portability requests.
+---
+
+The data export plugin answers a data access request ("what do you store
+about me?", GDPR Art. 15) and a portability request (the data in a
+machine-readable format, Art. 20) from better-auth, instead of
+collecting the data by hand.
+
+- **Self-service:** a signed-in user downloads one JSON file with
+  everything stored about them. It needs a recent sign-in and is rate
+  limited.
+- **For requests by email or support:** `auth.api.exportUserData` on the
+  server, and optionally an endpoint for admins.
+- **Complete without configuration:** it finds the data through
+  better-auth's schema: every model with a field that references the
+  user (better-auth's own, every plugin's, and yours), and the rows that
+  reference those. The audit log and the waitlist add the rows the
+  schema can't lead to.
+- **No secrets:** passwords, tokens, secrets, keys, and hashes are never
+  exported from better-auth's database, and the file lists what was left
+  out. What your `contributors` add is yours to filter.
+
+## Installation
+
+<Steps>
+<Step>
+
+### Install the package
+
+```package-install
+npm install @checodo/better-auth-data-export
+```
+
+</Step>
+<Step>
+
+### Add the plugin to your auth config
+
+```ts title="auth.ts"
+import { dataExport } from "@checodo/better-auth-data-export";
+import { betterAuth } from "better-auth";
+
+export const auth = betterAuth({
+  emailAndPassword: { enabled: true },
+  plugins: [dataExport()],
+});
+```
+
+The plugin adds no tables, so there is nothing to migrate.
+
+</Step>
+<Step>
+
+### Add the client plugin
+
+```ts title="auth-client.ts"
+import { dataExportClient } from "@checodo/better-auth-data-export/client";
+import { createAuthClient } from "better-auth/client";
+
+export const authClient = createAuthClient({
+  plugins: [dataExportClient()],
+});
+```
+
+</Step>
+</Steps>
+
+## Usage
+
+### Downloading your own data
+
+```ts
+const { data, error } = await authClient.dataExport.download();
+```
+
+The endpoint is `GET /data-export/download`. It answers with a download
+(`Content-Disposition: attachment`, never cached), so a plain link works
+too:
+
+```tsx no-check
+<a href="/api/auth/data-export/download">Download my data</a>
+```
+
+It needs a fresh session: signed in within `freshAge` seconds, by
+default better-auth's
+[`session.freshAge`](https://better-auth.com/docs/concepts/session-management)
+(a day), else it answers `SESSION_NOT_FRESH` (403) and the user signs in
+again. An export holds everything, so a shorter time is worth it:
+
+```ts title="auth.ts"
+dataExport({ freshAge: 15 * 60 }); // signed in within the last 15 minutes
+```
+
+Each IP address may download 3 times an hour (`rateLimit`). A download
+started from another site (a link or an image on a page the user
+visits) is refused with `CROSS_SITE_REQUEST` (403): such a page can't
+read the file, but would make exports in the user's name. It still
+counts toward the rate limit, which better-auth checks first.
+
+### The file
+
+```json
+{
+  "exportedAt": "2026-11-21T09:30:00.000Z",
+  "user": { "id": "...", "email": "ada@example.com", "name": "Ada", "...": "..." },
+  "data": {
+    "account": [{ "providerId": "credential", "...": "..." }],
+    "session": [{ "ipAddress": "203.0.113.7", "userAgent": "...", "...": "..." }],
+    "auditEvent": [{ "type": "sign-in", "...": "..." }]
+  },
+  "app": { "orders": [] },
+  "omitted": { "account": ["password"], "session": ["token"], "verification": ["*"] }
+}
+```
+
+- `data` has every row about the user, by model: better-auth's
+  `account` and `session`, official plugins' models (`twoFactor`,
+  `passkey`, `member`, `apikey`, ...), these plugins' models, and yours,
+  as long as they are in better-auth's schema and reference the user.
+- **Two steps away:** rows that reference those rows count too, such as
+  the referral plugin's steps of a user's referrals, up to three steps
+  from the user.
+- **Other plugins:** the [audit log](/docs/audit-log) adds the events
+  about the user and the ones they did (they have no foreign key on
+  purpose), and the [waitlist](/docs/waitlist) adds the user's entry
+  (keyed by email).
+- `omitted` lists, by model, the fields left out, and `["*"]` for models
+  left out entirely. The `verification` table (one-time tokens) is never
+  exported.
+
+Fields never exported, in any model: `password`, `token`, `secret`,
+`key`, `privateKey`, `backupCodes`, `deviceCode`, `userCode`, and every
+field ending in `Token`, `Hash`, `Secret`, or `Password` (`accessToken`,
+`refreshToken`, `idToken`, `tokenHash`, `clientSecret`, ...).
+
+### Your own data
+
+Data outside better-auth's schema (orders, uploads, messages) goes in
+with `contributors`, under `app`:
+
+```ts title="auth.ts"
+dataExport({
+  contributors: {
+    orders: (user) => db.order.findMany({ where: { userId: user.id } }),
+  },
+  // More fields, or whole models, to leave out.
+  omit: { user: ["internalNote"], apikey: true },
+});
+```
+
+A contributor that throws fails the export with `EXPORT_FAILED` (500),
+and the log names it, so a file is never silently incomplete. What a
+contributor returns goes into the file as it is: leave out secrets
+yourself.
+
+### Requests by email or support
+
+When someone asks by email, check that it is really them, then export
+on the server:
+
+```ts title="export.ts"
+const file = await auth.api.exportUserData({ body: { userId } });
+```
+
+With `admin: true`, admins (the `admin` role of better-auth's
+[admin plugin](https://better-auth.com/docs/plugins/admin), or
+`{ adminRoles, adminUserIds }`) can also export another user's data over
+HTTP, with a fresh session:
+
+```ts
+const { data } = await authClient.dataExport.admin({ userId });
+```
+
+An admin [impersonating](https://better-auth.com/docs/plugins/admin) a
+user counts as an admin export too: without `admin` the download is
+refused (`NOT_ALLOWED`), and with it the export is recorded with the
+admin as the actor.
+
+### Large accounts
+
+An export is made in one request, reading the database in pages. Above
+`maxRows` rows (50,000 by default) it fails with `EXPORT_TOO_LARGE`
+(422) instead of running out of memory; raise it, or export such an
+account on the server.
+
+### Recording and telling the user
+
+With the [audit log](/docs/audit-log), every export is recorded as
+`data-export.completed` (and a too large one as `data-export.failed`),
+with who asked: the user, an admin, or the server (and `EXPORT_FAILED`
+as `data-export.failed` too). To tell the user
+that an export was made, like a security alert, pass `onExport`:
+
+```ts title="auth.ts"
+dataExport({
+  onExport: async ({ user, via }) => {
+    if (user.email && via !== "user") {
+      await sendEmail({
+        to: user.email,
+        subject: "A copy of your data was made",
+        text: "We made a copy of your data, as you asked.",
+      });
+    }
+  },
+});
+```
+
+It runs in the background with better-auth's `backgroundTasks`; errors
+are logged.
+
+## Error codes
+
+Exported as `DATA_EXPORT_ERROR_CODES`, to compare with `error.code`. A
+session that isn't fresh gets better-auth's own `SESSION_NOT_FRESH`
+(403), and an unknown user `USER_NOT_FOUND` (404).
+
+| Code               | Status | When                                                        |
+| ------------------ | ------ | ----------------------------------------------------------- |
+| `EXPORT_TOO_LARGE` | 422    | The user has more than `maxRows` rows                       |
+| `EXPORT_FAILED`    | 500    | A contributor or another plugin's part of the export failed |
+| `NOT_ALLOWED`      | 403    | Another user's data without the `admin` option, or not an admin (also while impersonating) |
+| `CROSS_SITE_REQUEST` | 403  | The download was started from another site                  |
+
+## Options
+
+<TypeTable
+  type={{
+    omit: {
+      type: "Record<string, string[] | true>",
+      description:
+        "More fields to leave out, by model, or `true` for a whole model. Secrets are always left out.",
+    },
+    contributors: {
+      type: "Record<string, (user) => unknown>",
+      description: "The app's own data about the user, under `app.<name>`.",
+    },
+    maxRows: {
+      type: "number",
+      default: "50000",
+      description: "Most rows one export may hold; above it, `EXPORT_TOO_LARGE`.",
+    },
+    onExport: {
+      type: "(event, request?) => void | Promise<void>",
+      description:
+        "Called after each export with the user, `via` (`user`, `admin`, `server`), the admin's `actorUserId`, and the number of rows.",
+    },
+    admin: {
+      type: "boolean | { adminRoles?: string[]; adminUserIds?: string[] }",
+      default: "false",
+      description: "Lets admins export another user's data over HTTP.",
+    },
+    freshAge: {
+      type: "number",
+      default: "session.freshAge",
+      description:
+        "Seconds since sign-in within which a session may download; older ones get `SESSION_NOT_FRESH`. `0` turns the check off.",
+    },
+    rateLimit: {
+      type: "{ window: number; max: number }",
+      default: "{ window: 3600, max: 3 }",
+      description: "Requests per window (seconds) for the export endpoints, per IP address.",
+    },
+  }}
+/>
+
+`admin` as an object:
+
+<TypeTable
+  type={{
+    adminRoles: {
+      type: "string[]",
+      default: '["admin"]',
+      description: "Users with one of these roles count as admins.",
+    },
+    adminUserIds: {
+      type: "string[]",
+      description: "Users with these ids count as admins, whatever their role.",
+    },
+  }}
+/>

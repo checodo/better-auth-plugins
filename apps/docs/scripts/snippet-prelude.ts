@@ -14,6 +14,8 @@ import { authentication } from "@checodo/better-auth-authentication";
 import { authenticationClient } from "@checodo/better-auth-authentication/client";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { blocklistClient } from "@checodo/better-auth-blocklist/client";
+import { dataExport } from "@checodo/better-auth-data-export";
+import { dataExportClient } from "@checodo/better-auth-data-export/client";
 import { normalizeClient } from "@checodo/better-auth-normalize/client";
 import { emailNormalization } from "@checodo/better-auth-normalize/email";
 import { referral } from "@checodo/better-auth-referral";
@@ -48,6 +50,8 @@ export {
   privacyRelayDomains,
   reservedUsernames,
 } from "@checodo/better-auth-blocklist/lists";
+export { DATA_EXPORT_ERROR_CODES, dataExport } from "@checodo/better-auth-data-export";
+export { dataExportClient } from "@checodo/better-auth-data-export/client";
 export { NORMALIZE_ERROR_CODES } from "@checodo/better-auth-normalize";
 export { normalizeClient } from "@checodo/better-auth-normalize/client";
 export { emailNormalization } from "@checodo/better-auth-normalize/email";
@@ -83,6 +87,7 @@ export const auth = betterAuth({
     auditLog(),
     securityAlerts({ sendAlert: async () => {} }),
     emailNormalization(),
+    dataExport({ admin: true }),
   ],
 });
 
@@ -96,6 +101,7 @@ export const authClient = createAuthClient({
     auditLogClient(),
     securityAlertsClient(),
     normalizeClient(),
+    dataExportClient(),
     magicLinkClient(),
     emailOTPClient(),
   ],
@@ -121,6 +127,8 @@ export declare const ctx: GenericEndpointContext;
 export declare const order: { id: string; userId: string };
 export declare function alertSecurityTeam(event: unknown): Promise<void>;
 export declare function saveFailures(rows: { at: Date; type: string }[]): Promise<void>;
+/** The app's own database, as in `contributors` examples. */
+export declare const db: { order: { findMany(query: unknown): Promise<unknown[]> } };
 export declare function storeEvents(events: unknown[]): Promise<void>;
 export declare function sendSms(phoneNumber: string, text: string): Promise<void>;
 export declare function grantCredit(

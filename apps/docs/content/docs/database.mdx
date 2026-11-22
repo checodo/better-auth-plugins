@@ -77,6 +77,9 @@ stores about people, and what happens to it when a user is deleted.
 | `user.normalizedEmail` (normalize) | The normalized email address, e.g. `ada@gmail.com` for `a.da+news@gmail.com` | Deleted with the user (it is a field of the user) |
 | `user` (authentication) | Placeholder emails (`<account id>@steam.invalid`), names and avatars from the provider | better-auth's own deletion                         |
 
+The [data export](/docs/data-export) stores nothing; it puts the rows
+above that belong to a user in their export, without hashes.
+
 Tokens and invite codes are stored only as hashes. "Deleted with the
 user" works on every adapter: SQL databases also delete through foreign
 keys (`onDelete: "cascade"`), and each plugin deletes its rows itself

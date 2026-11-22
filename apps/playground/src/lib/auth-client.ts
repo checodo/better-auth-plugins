@@ -1,6 +1,7 @@
 import { auditLogClient } from "@checodo/better-auth-audit-log/client";
 import { authenticationClient } from "@checodo/better-auth-authentication/client";
 import { blocklistClient } from "@checodo/better-auth-blocklist/client";
+import { dataExportClient } from "@checodo/better-auth-data-export/client";
 import { normalizeClient } from "@checodo/better-auth-normalize/client";
 import { referralClient } from "@checodo/better-auth-referral/client";
 import { securityAlertsClient } from "@checodo/better-auth-security-alerts/client";
@@ -20,5 +21,6 @@ export const authClient = createAuthClient({
     auditLogClient(),
     authenticationClient(),
     securityAlertsClient(),
+    dataExportClient(),
   ],
 });

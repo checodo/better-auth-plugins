@@ -205,3 +205,33 @@ jobs:
 
       - name: Check for a changeset
         run: pnpm changeset status --since=origin/${{ github.base_ref }}
+
+  # On the "Version Packages" PR: fails while a package isn't on npm yet, so
+  # it isn't merged before the first-publish steps (CONTRIBUTING.md, "First
+  # publish of a new package"). The release workflow checks the same, but
+  # only after the merge. Re-run this job once the package is on npm.
+  npm-packages:
+    if: github.event_name == 'pull_request' && github.head_ref == 'changeset-release/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Check every package exists on npm
+        run: |
+          missing=false
+          for manifest in packages/*/package.json; do
+            if [ "$(node -p "require('./$manifest').private === true")" = true ]; then continue; fi
+            name=$(node -p "require('./$manifest').name")
+            if ! npm view "$name" name > /dev/null 2>&1; then
+              echo "::error::$name isn't on npm yet. Do the first-publish steps (CONTRIBUTING.md, \"First publish of a new package\") before merging, then re-run this job."
+              missing=true
+            fi
+          done
+          [ "$missing" = false ]

@@ -85,3 +85,34 @@ export async function findAll<T extends { id: string }>(
     after = last.id;
   }
 }
+
+/**
+ * Like `findAll` (keyset paging by id), but stops reading once more than
+ * `max` rows match: returns `null` then, so a caller can refuse instead of
+ * holding an unbounded result in memory.
+ */
+export async function findUpTo<T extends { id: string }>(
+  adapter: Pick<AuthContext["adapter"], "findMany">,
+  query: { model: string; where?: Where[] | undefined },
+  max: number,
+  pageSize = FIND_ALL_PAGE_SIZE,
+): Promise<T[] | null> {
+  const rows: T[] = [];
+  const where = query.where ?? [];
+  let after: string | null = null;
+  for (;;) {
+    // One row more than still fits, to notice when there are too many.
+    const limit = Math.min(pageSize, max - rows.length + 1);
+    const page: T[] = await adapter.findMany<T>({
+      model: query.model,
+      where: after === null ? where : [...where, { field: "id", value: after, operator: "gt" }],
+      limit,
+      sortBy: { field: "id", direction: "asc" },
+    });
+    rows.push(...page);
+    if (rows.length > max) return null;
+    const last = page.at(-1);
+    if (page.length < limit || !last) return rows;
+    after = last.id;
+  }
+}

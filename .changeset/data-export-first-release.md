@@ -1,0 +1,5 @@
+---
+"@checodo/better-auth-data-export": minor
+---
+
+First release: data access requests (GDPR Art. 15 and 20). Signed-in users download everything stored about them as one JSON document (`GET /data-export/download`: needs a fresh session, `freshAge`; refused from other sites; rate limited); server code exports any user with `auth.api.exportUserData`, and admins over HTTP with the `admin` option, which also covers an admin impersonating the user. The data is found through better-auth's schema (every model with a field that references the user, and rows that reference those), what other plugins add, and the app's `contributors`. Passwords, tokens, secrets, and hashes are never exported, and `omitted` lists what was left out. `maxRows` (default 50,000) refuses exports that are too large with `EXPORT_TOO_LARGE`, and a failing contributor fails the export with `EXPORT_FAILED`. With the audit log, exports are recorded as `data-export.completed` and `data-export.failed`; `onExport` lets the app tell the user.

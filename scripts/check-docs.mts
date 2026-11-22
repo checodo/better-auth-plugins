@@ -55,6 +55,12 @@ const PLUGINS: PluginDocs[] = [
   },
   { dir: "blocklist", pages: ["blocklist.mdx"], options: "BlocklistOptions" },
   {
+    dir: "data-export",
+    pages: ["data-export.mdx"],
+    options: "DataExportOptions",
+    extraOptions: ["DataExportAdminOptions"],
+  },
+  {
     dir: "normalize",
     pages: ["normalize.mdx"],
     options: "EmailNormalizationOptions",

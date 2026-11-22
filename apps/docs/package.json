@@ -24,6 +24,7 @@
     "@checodo/better-auth-audit-log": "workspace:*",
     "@checodo/better-auth-authentication": "workspace:*",
     "@checodo/better-auth-blocklist": "workspace:*",
+    "@checodo/better-auth-data-export": "workspace:*",
     "@checodo/better-auth-normalize": "workspace:*",
     "@checodo/better-auth-referral": "workspace:*",
     "@checodo/better-auth-security-alerts": "workspace:*",

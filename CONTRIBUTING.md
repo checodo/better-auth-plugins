@@ -551,7 +551,8 @@ elsewhere: npm 11.15 or newer has `npm stage` and `npm trust`), signed in with t
 3. **Release within 2 days**: npm drops a trust setup that nothing has
    published through within 2 days. Merge the "Version Packages" pull
    request with the new package's first version soon after step 2. If
-   it expired, run step 2 again.
+   it expired, run step 2 again. CI's `npm-packages` check on that pull
+   request fails until the package is on npm; re-run it after step 1.
 4. Right after the first release, remove the placeholders, then
    `npm logout`:
    - The staged `0.0.1-bootstrap`: `npm stage list`, then

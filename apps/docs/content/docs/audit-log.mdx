@@ -252,6 +252,8 @@ don't depend on it.
 | `blocklist.blocked`      | [Blocklist](/docs/blocklist)   | A sign-up, sign-in, or change is refused (`status: "failure"`). `metadata`: `target`, the `value`, and the `rule` (both values `"[redacted]"` for passwords) | medium |
 | `blocklist.rule-created` | Blocklist                      | An admin creates a rule                                | high     |
 | `blocklist.rule-deleted` | Blocklist                      | An admin deletes a rule                                | high     |
+| `data-export.completed`  | [Data export](/docs/data-export) | A user's data is exported. `actorUserId`: the user, the admin, or none (server). `metadata`: `via`, `rows` | low (by an admin: medium) |
+| `data-export.failed`     | Data export                    | An export fails (`status: "failure"`, `errorCode`: `EXPORT_TOO_LARGE` or `EXPORT_FAILED`). `metadata.via` | medium |
 | `normalize.email-alias-refused` | [Normalize](/docs/normalize) | A second account for an inbox is refused (`status: "failure"`, no actor, `userId`: the existing account). `metadata.email`: the address tried | medium |
 | `referral.created`       | [Referral](/docs/referral)     | A user signs up with a referral code (`userId`: the new user) | low |
 | `referral.completed`     | Referral                       | A referral completes (`userId`: the referrer it rewards) | medium |
@@ -303,6 +305,8 @@ them in your privacy policy and keep them only as long as you need
   `actorUserId` is that user (or pseudonymize them) in the `auditEvent`
   table. With the [hash chain](#hash-chain), verification then reports
   those events; keep a note of which ones you erased.
+- With the [data export](/docs/data-export), a user's export includes the
+  events about them and the ones they did.
 - User agents and metadata are whatever the client sent: escape them when
   you display them (React does this for you).
 - `beforeLog` changes or drops an event before it is stored, for example

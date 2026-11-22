@@ -16,6 +16,8 @@ import { blocklistClient } from "@checodo/better-auth-blocklist/client";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
 import { disposableEmailDomains as disposableOnly } from "@checodo/better-auth-blocklist/lists/disposable-email-domains";
 import { reservedUsernames as reservedOnly } from "@checodo/better-auth-blocklist/lists/reserved-usernames";
+import { DATA_EXPORT_ERROR_CODES, dataExport } from "@checodo/better-auth-data-export";
+import { dataExportClient } from "@checodo/better-auth-data-export/client";
 import { NORMALIZE_ERROR_CODES } from "@checodo/better-auth-normalize";
 import { normalizeClient } from "@checodo/better-auth-normalize/client";
 import { emailNormalization } from "@checodo/better-auth-normalize/email";
@@ -46,6 +48,7 @@ const options = {
     waitlist({ allow: ["example.com"], confirmEmail: false }),
     referral(),
     emailNormalization({ subaddressing: "all" }),
+    dataExport(),
     authentication({ steam: {} }),
     auditLog({
       destinations: [
@@ -70,6 +73,7 @@ const client = createAuthClient({
     waitlistClient(),
     referralClient(),
     normalizeClient(),
+    dataExportClient(),
     authenticationClient(),
     auditLogClient(),
   ],
@@ -79,8 +83,9 @@ const typed: Array<(...args: never[]) => unknown> = [
   client.waitlist.join,
   client.referral.getCode,
   client.auditLog.listEvents,
+  client.dataExport.download,
 ];
-assert.equal(typed.length, 4);
+assert.equal(typed.length, 5);
 
 // Every subpath export loads.
 assert.ok(disposableOnly.length > 1000, "disposable list is loaded");
@@ -88,6 +93,7 @@ assert.ok(reservedOnly.includes("admin"), "reserved usernames are loaded");
 for (const codes of [
   AUDIT_LOG_ERROR_CODES,
   BLOCKLIST_ERROR_CODES,
+  DATA_EXPORT_ERROR_CODES,
   REFERRAL_ERROR_CODES,
   WAITLIST_ERROR_CODES,
 ]) {
@@ -161,6 +167,17 @@ const alias = await call("/sign-up/email", {
 assert.equal(alias.status, 422, `normalize: ${await alias.clone().text()}`);
 assert.equal(normalizePhoneNumber("+49 151 12345678"), "+4915112345678");
 assert.ok(NORMALIZE_ERROR_CODES.INVALID_PHONE_NUMBER, "normalize error codes");
+
+// data-export: the signed-in user downloads their data, without the password.
+const download = await call("/data-export/download", { cookie });
+assert.equal(download.status, 200, `data-export: ${await download.clone().text()}`);
+assert.match(download.headers.get("content-disposition") ?? "", /^attachment;/);
+const file = (await download.json()) as {
+  user: { email: string };
+  omitted: Record<string, string[]>;
+};
+assert.ok(file.user.email, "data-export has the user");
+assert.ok(file.omitted.account?.includes("password"), "data-export leaves out the password");
 
 // authentication: Steam builds its sign-in URL without network access.
 const steam = await call("/sign-in/social", {

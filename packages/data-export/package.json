@@ -1,0 +1,79 @@
+{
+  "name": "@checodo/better-auth-data-export",
+  "version": "0.1.0",
+  "description": "Data access requests for better-auth: every user can download their data (GDPR Art. 15 and 20), with secrets left out.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Clas Heinemeyer",
+    "email": "the.checodo@gmail.com",
+    "url": "https://checodo.dev"
+  },
+  "homepage": "https://checodo-better-auth-plugins.vercel.app/docs/data-export",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/checodo/better-auth-plugins.git",
+    "directory": "packages/data-export"
+  },
+  "bugs": {
+    "url": "https://github.com/checodo/better-auth-plugins/issues"
+  },
+  "keywords": [
+    "better-auth",
+    "better-auth-plugin",
+    "gdpr",
+    "data-export",
+    "data-portability",
+    "privacy",
+    "auth"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch --no-clean",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo",
+    "lint:package": "publint && attw --pack . --profile esm-only"
+  },
+  "peerDependencies": {
+    "@better-auth/core": "catalog:",
+    "better-auth": "catalog:"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@better-auth/core": "catalog:",
+    "@checodo/better-auth-audit-log": "workspace:*",
+    "@checodo/better-auth-waitlist": "workspace:*",
+    "@repo/plugin-utils": "workspace:*",
+    "@repo/tooling": "workspace:*",
+    "@types/node": "catalog:",
+    "better-auth": "catalog:",
+    "tsdown": "^0.23.7",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

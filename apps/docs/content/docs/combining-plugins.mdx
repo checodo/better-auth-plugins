@@ -68,6 +68,7 @@ before a user is created.
 | Waitlist + authentication        | Steam, Epic, and Xbox players have placeholder emails, which are never on the waitlist: `allow` their domains, as above.              |
 | Blocklist + authentication       | Nobody can sign up with a placeholder domain (`EMAIL_DOMAIN_RESERVED`); blocklist rules apply to real emails as usual.                |
 | Security alerts + audit log      | Every alert is recorded as `security.alert-sent`, and a secured account as `security.account-secured`. Neither plugin needs the other. |
+| Data export + any plugin         | A user's export has every plugin's rows about them: the audit log adds their events, the waitlist their entry, and the rest is found through the schema. With the audit log, exports are recorded. |
 | Audit log + any plugin           | Blocklist refusals and rule changes, waitlist approvals, and referrals are recorded, see [Events from other plugins](/docs/audit-log#events-from-other-plugins). |
 
 ## Works with better-auth's plugins

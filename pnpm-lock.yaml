@@ -286,6 +286,9 @@ importers:
       '@checodo/better-auth-blocklist':
         specifier: workspace:*
         version: link:../../packages/blocklist
+      '@checodo/better-auth-data-export':
+        specifier: workspace:*
+        version: link:../../packages/data-export
       '@checodo/better-auth-normalize':
         specifier: workspace:*
         version: link:../../packages/normalize
@@ -346,6 +349,9 @@ importers:
       '@checodo/better-auth-blocklist':
         specifier: workspace:*
         version: link:../../packages/blocklist
+      '@checodo/better-auth-data-export':
+        specifier: workspace:*
+        version: link:../../packages/data-export
       '@checodo/better-auth-normalize':
         specifier: workspace:*
         version: link:../../packages/normalize
@@ -479,6 +485,43 @@ importers:
       '@better-auth/core':
         specifier: 'catalog:'
         version: 1.7.25(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5)
+      '@repo/plugin-utils':
+        specifier: workspace:*
+        version: link:../plugin-utils
+      '@repo/tooling':
+        specifier: workspace:*
+        version: link:../tooling
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      better-auth:
+        specifier: 'catalog:'
+        version: 1.7.25(mongodb@7.9.0)(mysql2@3.24.6(@types/node@24.19.2))(next@16.4.6(@types/node@24.19.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)))
+      tsdown:
+        specifier: ^0.23.7
+        version: 0.23.7(@arethetypeswrong/core@0.18.5)(publint@0.3.25)(typescript@5.9.3)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/data-export:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
+    devDependencies:
+      '@better-auth/core':
+        specifier: 'catalog:'
+        version: 1.7.25(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.5(zod@4.6.7))(jose@6.2.17)(kysely@0.29.8)(nanostores@1.5.5)
+      '@checodo/better-auth-audit-log':
+        specifier: workspace:*
+        version: link:../audit-log
+      '@checodo/better-auth-waitlist':
+        specifier: workspace:*
+        version: link:../waitlist
       '@repo/plugin-utils':
         specifier: workspace:*
         version: link:../plugin-utils

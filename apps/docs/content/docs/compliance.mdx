@@ -71,6 +71,7 @@ qualified adviser.
 | [Audit log](#audit-log)           | CC6.2, CC6.3, CC7.2, CC7.3, P4.2, P4.3 | A.5.28, A.8.2, A.8.10, A.8.11, A.8.15, A.8.16 | Art. 5(1)(c), 5(1)(e), 15, 32, 33 | -                 |
 | [Authentication](#authentication) | CC6.1                                  | A.5.16, A.8.5                                 | Art. 5(1)(c)                      | -                 |
 | [Blocklist](#blocklist)           | CC6.1, CC6.2, CC6.6                    | A.5.16, A.5.17, A.8.5                         | Art. 32                           | §3.1.1.2          |
+| [Data export](#data-export)       | P5.1                                   | A.5.34                                        | Art. 12, 15, 20                   | -                 |
 | [Normalize](#normalize)           | CC6.2                                  | A.5.16                                        | Art. 5(1)(c), 5(1)(d)             | -                 |
 | [Referral](#referral)             | -                                      | -                                             | Art. 5(1)(c), 17                  | -                 |
 | [Security alerts](#security-alerts) | CC7.2, CC7.3, CC7.4                  | A.5.17, A.5.26, A.8.16                        | Art. 32                           | §4.1.2.1, §4.2, §4.3, §4.6 |
@@ -108,7 +109,7 @@ account changes, and admin actions, and the events of the other plugins.
 | SOC 2 P4.2, P4.3, ISO A.8.10 (Information deletion), GDPR Art. 5(1)(e) | The opt-in [`retention`](/docs/audit-log#retention) deletes eligible audit events when cleanup runs. This can support retention and deletion controls, but backups and other copies remain your responsibility |
 | ISO A.8.11 (Data masking), GDPR Art. 5(1)(c)                     | `captureIp` and `captureUserAgent` turn data off; [`beforeLog`](/docs/audit-log#privacy) can pseudonymize it; metadata under recognized secret-related keys is redacted (see below) |
 | ISO A.5.28 (Collection of evidence)                                | Admins can [export](/docs/audit-log#export) events as NDJSON or CSV for auditors and evidence requests, and [verify the hash chain](/docs/audit-log#hash-chain) over HTTP or from a job |
-| GDPR Art. 15                                                     | Users can list their own audit events. This may support an access request, but it does not provide a complete export of all personal data processed by the organization |
+| GDPR Art. 15                                                     | Users can list their own audit events, and with the [data export](/docs/data-export) their events are part of their export (the events about them and the ones they did) |
 
 Left to you:
 
@@ -208,6 +209,32 @@ Left to you:
   counts per IP address.
 - **IP rules are not a network control.** They keep out casual abuse,
   not someone with a VPN; your firewall or WAF is the network control.
+
+## Data export
+
+The [data export](/docs/data-export) plugin lets each user download what
+is stored about them in better-auth's database, as one JSON file.
+
+| Control                                                    | How the plugin can contribute                                                                 |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| GDPR Art. 15 (right of access), SOC 2 P5.1 (access to personal information), ISO A.5.34 (Privacy and protection of PII) | A signed-in user downloads every row about them: better-auth's models, every plugin's, and the app's own models in better-auth's schema, plus `contributors` for data elsewhere. Server code (and admins, if enabled) can export for requests that come in by email |
+| GDPR Art. 20 (data portability)                            | One structured, machine-readable JSON file                                                     |
+| GDPR Art. 12(1), Art. 32 (security of processing)          | Needs a recent sign-in and is rate limited; passwords, tokens, secrets, and hashes are never exported, and the file lists what it leaves out. With the audit log, every export is recorded, with who asked |
+
+Left to you:
+
+- **Data outside the database.** Backups, logs, files in storage, and
+  data at third-party processors (email, analytics, payments) are not in
+  the export unless a `contributor` adds them.
+- **The rest of Art. 15.** An export is the copy of the data; the
+  purposes, recipients, retention periods, and the source of the data
+  (Art. 15(1)(a)–(h)) belong in your answer or privacy notice.
+- **Identity checks and deadlines.** For a request by email, check it is
+  really the person before calling `exportUserData`, and answer within
+  one month (Art. 12(3)).
+- **Other people's data.** Rows about the user can name other users,
+  such as a referral's other side; review exports made for third
+  parties before sending them.
 
 ## Normalize
 
@@ -328,9 +355,6 @@ Things the plugins don't do yet, so you don't find out in an audit:
   requests need a decision: delete or pseudonymize those events yourself,
   see the audit log's [Privacy](/docs/audit-log#privacy) section. The
   [Personal data](/docs/database#personal-data) table lists every table.
-- **No self-service export for users.** Admins can
-  [export](/docs/audit-log#export) audit events; users can only list
-  their own, so an access request still needs an admin.
 - **No account lockout.** Failed sign-ins are recorded and rate limited
   per IP address, not counted per account.
 

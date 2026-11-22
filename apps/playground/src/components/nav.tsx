@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/referral", label: "Referral" },
   { href: "/security-alerts", label: "Security alerts" },
   { href: "/audit-log", label: "Audit log" },
+  { href: "/data-export", label: "Data export" },
 ];
 
 export function Nav() {

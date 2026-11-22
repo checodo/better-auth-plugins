@@ -4,6 +4,7 @@ import { consoleDestination } from "@checodo/better-auth-audit-log/destinations"
 import { authentication } from "@checodo/better-auth-authentication";
 import { blocklist } from "@checodo/better-auth-blocklist";
 import { disposableEmailDomains, reservedUsernames } from "@checodo/better-auth-blocklist/lists";
+import { dataExport } from "@checodo/better-auth-data-export";
 import { emailNormalization } from "@checodo/better-auth-normalize/email";
 import { referral } from "@checodo/better-auth-referral";
 import { securityAlerts } from "@checodo/better-auth-security-alerts";
@@ -160,6 +161,8 @@ export const authOptions = {
     // is refused once `ada@acme.test` exists, and can sign in as her.
     emailNormalization({ subaddressing: "all", allowNormalizedSignIn: true }),
     username(),
+    // Every user can download their data; admins anyone's.
+    dataExport({ admin: true }),
     admin(),
     organization({ teams: { enabled: true } }),
     // After the other plugins, so it sees finished sign-ins; only

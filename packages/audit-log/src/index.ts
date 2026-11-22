@@ -11,6 +11,7 @@ import { createEventEndpoints } from "./routes/events";
 import { createExportEndpoints, exportRateLimit } from "./routes/export";
 import { auditChainSchema, auditLogSchema } from "./schema";
 import type { AuditLogOptions } from "./types";
+import { createExportUserData } from "./user-data";
 
 export type { AuditChainLink, ChainProblem, ChainRange, ChainVerification } from "./chain";
 export { AUDIT_LOG_ERROR_CODES, type AuditLogErrorCode } from "./error-codes";
@@ -116,6 +117,11 @@ export const auditLog = (options: AuditLogOptions = {}) => {
      * Never throws.
      */
     recordEvent: createRecordEvent(recorder),
+    /**
+     * The user's events, for `@checodo/better-auth-data-export`: the
+     * events about them and the ones they did.
+     */
+    exportUserData: createExportUserData(resolved.storage),
   });
 };
 

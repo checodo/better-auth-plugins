@@ -1,4 +1,5 @@
-import type { BetterAuthPlugin } from "@better-auth/core";
+import type { AuthContext, BetterAuthPlugin } from "@better-auth/core";
+import type { ExportUserData } from "@repo/plugin-utils/user-data";
 import { createAuthMiddleware } from "better-auth/api";
 import { mergeSchema } from "better-auth/db";
 import { version } from "../package.json";
@@ -10,7 +11,9 @@ import { createAdminEndpoints } from "./routes/admin";
 import { createCleanupEndpoints } from "./routes/cleanup";
 import { createJoinEndpoints } from "./routes/join";
 import { waitlistSchema } from "./schema";
+import { findEntryByEmail } from "./store";
 import type { WaitlistOptions } from "./types";
+import { normalizeEmail } from "./utils/email";
 
 export { WAITLIST_ERROR_CODES, type WaitlistErrorCode } from "./error-codes";
 export type {
@@ -64,7 +67,7 @@ export const waitlist = (options: WaitlistOptions = {}) => {
   const resolved = resolveOptions(options);
   const cleanup = createCleanup(resolved);
 
-  return {
+  const plugin = {
     id: "waitlist",
     version,
     init(ctx) {
@@ -92,6 +95,20 @@ export const waitlist = (options: WaitlistOptions = {}) => {
     $ERROR_CODES: WAITLIST_ERROR_CODES,
     options,
   } satisfies BetterAuthPlugin;
+
+  /**
+   * The user's waitlist entry, for `@checodo/better-auth-data-export`: it
+   * is keyed by email, so the export can't find it on its own.
+   */
+  const exportUserData = (async (
+    user: { id: string; email: string | null },
+    { adapter }: { adapter: AuthContext["adapter"]; maxRows: number },
+  ): Promise<Record<string, Record<string, unknown>[]> | null> => {
+    if (!user.email) return { waitlistEntry: [] };
+    const entry = await findEntryByEmail(adapter, normalizeEmail(user.email));
+    return { waitlistEntry: entry ? [entry as unknown as Record<string, unknown>] : [] };
+  }) satisfies ExportUserData;
+  return Object.assign(plugin, { exportUserData });
 };
 
 export type WaitlistPlugin = ReturnType<typeof waitlist>;
