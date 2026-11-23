@@ -12,7 +12,7 @@ error codes, and database tables.
 npm install @checodo/better-auth-referral
 ```
 
-Requires `better-auth` and `@better-auth/core` 1.7.20 or a later 1.x
+Requires `better-auth` and `@better-auth/core` 1.7.27 or a later 1.x
 release (peer dependencies). ESM only.
 
 ## Usage
