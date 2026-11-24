@@ -1,6 +1,6 @@
 {
   "name": "@checodo/better-auth-security-alerts",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Tell users about security-relevant changes to their account in better-auth: new-device sign-ins, password and email changes, passkeys, two-factor, linked accounts, and API keys.",
   "type": "module",
   "license": "MIT",
