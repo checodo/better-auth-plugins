@@ -1,6 +1,6 @@
 {
   "name": "@checodo/better-auth-normalize",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Email and phone number normalization for better-auth: one account per inbox, and phone numbers in E.164.",
   "type": "module",
   "license": "MIT",

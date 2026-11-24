@@ -1,5 +1,11 @@
 # @checodo/better-auth-blocklist
 
+## 0.4.1
+
+### Patch Changes
+
+- c59d897: Require `better-auth` and `@better-auth/core` 1.7.27 or a later 1.x release (was 1.7.20). It brings better-auth's recent fixes, such as the origin check on anonymous sign-in and expired two-factor challenges being rejected. The plugins' own behavior is unchanged.
+
 ## 0.4.0
 
 ### Minor Changes
